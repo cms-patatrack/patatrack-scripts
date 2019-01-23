@@ -222,7 +222,7 @@ def multiCmsRun(
 
   # store performance points for later analysis
   if data and header:
-    data.write('%s, %s, %s, %s, %s, %s, %s, %s\n' % ('"jobs"', '"overlap"', '"CPU threads per job"', '"EDM streams per job"', '"GPUs per jobs"', '"number of events"', '"average throughput (ev/s)"', '"uncertainty (ev/s)"'))
+    data.write('%s, %s, %s, %s, %s, %s, %s, %s\n' % ('jobs', 'overlap', 'CPU threads per job', 'EDM streams per job', 'GPUs per jobs', 'number of events', 'average throughput (ev/s)', 'uncertainty (ev/s)'))
 
   for repeat in range(repeats):
     # run the jobs reading the output to extract the event throughput
