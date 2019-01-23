@@ -8,7 +8,7 @@ import pandas as pd
 import matplotlib as mpl
 import seaborn as sns
 
-style = {                       # based on 'whitegrid'
+sns.set(style={                 # based on 'whitegrid'
   'axes.axisbelow': True,
   'axes.edgecolor': '.15',      # .8
   'axes.facecolor': 'white',
@@ -34,17 +34,15 @@ style = {                       # based on 'whitegrid'
   'ytick.direction': 'out',
   'ytick.major.size': 0,
   'ytick.minor.size': 0,
-}
+})
 
-mtv_palette = sns.color_palette([
-  (0.,  0.,  1.),   # ROOT kBlue
-  (1.,  0.,  0.),   # ROOT kRed
-  (0.,  0.,  0.),   # ROOT kBlack
-  (1.,  0.4, 0.),   # ROOT kOrange +7
-  (0.8, 0.2, 0.8),  # ROOT kMagenta -3
+sns.set_palette([
+  (0.,  0.,  1.),           # ROOT kBlue
+  (1.,  0.,  0.),           # ROOT kRed
+  (0.,  0.,  0.),           # ROOT kBlack
+  (1.,  0.4, 0.),           # ROOT kOrange +7
+  (0.8, 0.2, 0.8),          # ROOT kMagenta -3
 ], 5)
-
-sns.set(style=style, palette=mtv_palette)
 
 data = []
 
@@ -73,7 +71,7 @@ plot = sns.lmplot(
   y = 'average throughput (ev/s)',
   order = 4,                        # polynomial fit
   hue = 'name',                     # different categories
-  size = 5.4,                       # plot height in inches, at 100 dpi
+  height = 5.4,                     # plot height in inches, at 100 dpi
   aspect = 16./9.,                  # plot aspect ratio
   legend = True,
   legend_out = True,                # show the legend to the right of the plot
