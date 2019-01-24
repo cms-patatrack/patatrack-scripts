@@ -8,6 +8,15 @@ import pandas as pd
 import matplotlib as mpl
 import seaborn as sns
 
+# workaround for seaborn 0.9.0
+def fix_plot_range(plot):
+  data = plot.data[plot._x_var]
+  xmin = min(data)
+  xmax = max(data)
+  step = (xmax - xmin) * 0.05
+  plot.set(xlim=(xmin - step, xmax + step))
+
+
 sns.set(style={                 # based on 'whitegrid'
   'axes.axisbelow': True,
   'axes.edgecolor': '.15',      # .8
@@ -78,4 +87,5 @@ plot = sns.lmplot(
   truncate = False,
   ci = 95,
   )
+fix_plot_range(plot)                # workaround for seaborn 0.9.0
 plot.savefig('plot.png')
