@@ -15,6 +15,7 @@ def fix_plot_range(plot):
   xmax = max(data)
   step = (xmax - xmin) * 0.05
   plot.set(xlim=(xmin - step, xmax + step))
+  plot.set(ylim=(0, None))
 
 
 sns.set(style={                 # based on 'whitegrid'
