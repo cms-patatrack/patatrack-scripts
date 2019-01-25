@@ -75,6 +75,10 @@ for filename in sys.argv[1:]:
 df = pd.concat(data, ignore_index = True)
 del data
 
+# normalise to the number of jobs
+df['average throughput (ev/s)'] /= df['jobs']
+df['uncertainty (ev/s)']        /= df['jobs']
+
 plot = sns.lmplot(
   data = df,
   x = 'CPU threads per job',
