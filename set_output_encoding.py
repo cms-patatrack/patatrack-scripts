@@ -2,9 +2,7 @@
 
 # see https://stackoverflow.com/a/19700891/2050986
 
-import sys
-
-def set_output_encoding(encoding='utf-8'):
+def set_output_encoding(encoding='utf-8', force=False):
     import sys
     import codecs
     '''When piping to the terminal, python knows the encoding needed, and
@@ -13,8 +11,8 @@ def set_output_encoding(encoding='utf-8'):
        is None. What I am doing here is to catch this situation for both 
        stdout and stderr and force the encoding'''
     current = sys.stdout.encoding
-    if current is None :
+    if current is None or force:
         sys.stdout = codecs.getwriter(encoding)(sys.stdout)
     current = sys.stderr.encoding
-    if current is None :
+    if current is None or force:
         sys.stderr = codecs.getwriter(encoding)(sys.stderr)
