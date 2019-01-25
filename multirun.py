@@ -18,7 +18,7 @@ import FWCore.ParameterSet.Config as cms
 
 # set the output encoding to UTF-8 for pipes and redirects
 from set_output_encoding import *
-set_output_encoding()
+set_output_encoding(encoding='utf-8', force=True)
 
 from cpuinfo import *
 from gpuinfo import *
