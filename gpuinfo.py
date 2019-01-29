@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import sys
+import os
 import subprocess
 import re
 import collections
@@ -24,11 +25,17 @@ def get_gpu_info(cache = True):
 
   gpus = collections.OrderedDict()
 
+  visible = None
+  if 'CUDA_VISIBLE_DEVICES' in os.environ:
+    visible = [int(device) for device in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
+
   devices = subprocess.Popen(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
   for line in devices.splitlines():
     matches = re.match(r'GPU ([0-9]+): (.*)', line)
     if matches:
       device = int(matches.group(1))
+      if visible and not device in visible:
+        continue
       model  = matches.group(2).strip()
       gpus[device] = GPUInfo(device, model)
 
@@ -40,7 +47,7 @@ def get_gpu_info(cache = True):
 
 if __name__ == "__main__":
   gpus = get_gpu_info()
-  print '%d NVIDIA GPUs:' % len(gpus)
+  print '%d visible NVIDIA GPUs:' % len(gpus)
   for gpu in gpus.values():
     print '  %d: %s' % (gpu.device, gpu.model)
 

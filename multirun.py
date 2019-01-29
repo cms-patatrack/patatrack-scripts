@@ -298,7 +298,7 @@ def info():
     print '  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads))
   print
 
-  print '%d NVIDIA GPUs:' % len(gpus)
+  print '%d visible NVIDIA GPUs:' % len(gpus)
   for gpu in gpus.values():
     print '  %d: %s' % (gpu.device, gpu.model)
   print
