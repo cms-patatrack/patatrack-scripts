@@ -167,7 +167,7 @@ def multiCmsRun(
     if allow_hyperthreading:
       cpu_list = list(itertools.chain(*(map(str, cpu.hardware_threads) for cpu in cpus.values())))
     else:
-      cpu_list = list(chain(*(map(str, cpu.physical_processors) for cpu in cpus.values())))
+      cpu_list = list(itertools.chain(*(map(str, cpu.physical_processors) for cpu in cpus.values())))
 
     # if all the jobs fit within individual sockets, assing jobs to sockets in a round-robin
     if len(cpu_list) // len(cpus) // threads * len(cpus) >= jobs:

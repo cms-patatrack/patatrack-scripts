@@ -43,7 +43,7 @@ if __name__ == "__main__":
   info()
 
   # save scan results to 'scan.csv'
-  scan = open('scan.csv', 'w')
+  scan = open('scan.csv', 'w', 1)
   header = True
 
   if max_threads is None:
