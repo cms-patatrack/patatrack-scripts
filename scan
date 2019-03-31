@@ -26,39 +26,56 @@ if __name__ == "__main__":
     'warmup'              : True,
     'events'              : 4200,
     'repeats'             : 4,
-    'jobs'                : 2,
-    'threads'             : None,   # overridden by the scan
-    'streams'             : None,   # if None, set to the number of threads for each step of the scan
+    'jobs'                : None,       # if None, set the number of jobs to fill all available CPUs
+    'threads'             : None,       # overridden by the scan
+    'streams'             : None,       # if None, set to the number of threads for each step of the scan
     'gpus_per_job'        : 1,
-    'allow_hyperthreading': True,   # this has no effect if set_cpu_affinity is False
-    'set_cpu_affinity'    : False,
+    'allow_hyperthreading': False,      # this determined the number and afifnity of the CPUs used by each job
+    'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
+    'logdir'              : 'logs',     # relative or absolute path, or None to disable storing the logs
   }
 
   # options specific to scan
-  min_threads =  6      # minimum is 1
-  max_threads = 12      # None to guess based on the number of available cores (or threads) and concurrent jobs
+  steps = None                          # list, or None to make a linear scan from min_step to max_step
+  min_step  =  1                        # minimum is 1
+  max_step  = 32                        # None to guess based on the number of available cores (or threads) and concurrent jobs
+
+  ##############################################################################
 
   # print a system overview
   info()
 
   # save scan results to 'scan.csv'
-  scan = open('scan.csv', 'w', 1)
-  header = True
+  options['data'] = open('scan.csv', 'w', 1)
+  options['header'] = True
 
-  if max_threads is None:
-    cpus = get_cpu_info()
-    if options['allow_hyperthreading']:
-      count = sum(len(cpu.hardware_threads) for cpu in cpus.values())
-    else:
-      count = sum(len(cpu.physical_processors) for cpu in cpus.values())
-    max_threads = count // options['jobs']
+  # check the available cpus
+  cpus = get_cpu_info()
+  if options['allow_hyperthreading']:
+    count = sum(len(cpu.hardware_threads) for cpu in cpus.values())
+  else:
+    count = sum(len(cpu.physical_processors) for cpu in cpus.values())
 
-  for threads in range(min_threads, max_threads + 1):
-    if options['streams'] is not None:
-      multiCmsRun(process, **dict(options, threads = threads, data = scan, header = header))
-    else:
-      multiCmsRun(process, **dict(options, threads = threads, streams = threads, data = scan, header = header))
+  # use the explicit list of steps, or a linear scan
+  if max_step is None:
+    max_step = count // options['jobs']
+
+  if not steps:
+    steps = range(min_step, max_step + 1)
+
+  # make a copy of the options to be updated during the scan
+  step_opt = dict(options)
+
+  for step in steps:
+    # update the options for each step
+    step_opt['threads'] = options['threads'] if options['threads'] is not None else step
+    step_opt['streams'] = options['streams'] if options['streams'] is not None else step
+    step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
+
+    # run
+    multiCmsRun(process, **step_opt)
+
     # warm up only once
-    options['warmup'] = False
-    header = False
+    step_opt['warmup'] = False
+    step_opt['header'] = False
