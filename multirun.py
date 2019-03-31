@@ -315,15 +315,23 @@ def multiCmsRun(
     # filter out the jobs with an overlap lower than 95%
     values = [ throughputs[i] for i in range(repeats) if overlaps[i] >= 0.95 ]
     n = len(values)
-    throughput = np.average(values)
-    error = np.std(values, ddof=1)
+    if n > 0:
+      value = np.average(values)
+      error = np.std(values, ddof=1)
+    else:
+      # no jobs with an overlap > 95%, use the "best" one
+      value = throughputs[overlaps.index(max(overlaps))]
+      error = float('nan')
     print ' --------------------'
     if n == repeats:
       formatting = u'%8.1f \u00b1 %5.1f ev/s'
-      print formatting % (throughput, error)
-    else:
+      print formatting % (value, error)
+    elif n > 0:
       formatting = u'%8.1f \u00b1 %5.1f ev/s (based on %d measurements)'
-      print formatting % (throughput, error, n)
+      print formatting % (value, error, n)
+    else:
+      formatting = u'%8.1f (single measurement with the highest overlap)'
+      print formatting % (value, )
     print
 
   # delete the temporary work dir
