@@ -29,8 +29,8 @@ if __name__ == "__main__":
     'threads'             : 8,          # per job
     'streams'             : 8,          # per job
     'gpus_per_job'        : 1,          # per job
-    'allow_hyperthreading': True,
-    'set_cpu_affinity'    : True,
+    'allow_hyperthreading': True,       # this has no effect if set_cpu_affinity is False
+    'set_cpu_affinity'    : False,
     'set_gpu_affinity'    : True,
   }
 

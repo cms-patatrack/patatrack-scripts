@@ -30,8 +30,8 @@ if __name__ == "__main__":
     'threads'             : None,   # overridden by the scan
     'streams'             : None,   # if None, set to the number of threads for each step of the scan
     'gpus_per_job'        : 1,
-    'allow_hyperthreading': True,
-    'set_cpu_affinity'    : True,
+    'allow_hyperthreading': True,   # this has no effect if set_cpu_affinity is False
+    'set_cpu_affinity'    : False,
     'set_gpu_affinity'    : True,
   }
 
