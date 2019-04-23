@@ -30,7 +30,7 @@ gpus = get_gpu_info()
 epoch = datetime.now()
 
 @threaded
-def singleCmsRun(filename, workdir, verbose = False, cpus = None, gpus = None, *args):
+def singleCmsRun(filename, workdir, logdir = None, verbose = False, cpus = None, gpus = None, *args):
   # optionally set CPU affinity
   command = ('cmsRun', filename) + args
   if cpus is not None:
@@ -49,12 +49,12 @@ def singleCmsRun(filename, workdir, verbose = False, cpus = None, gpus = None, *
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
   (out, err) = job.communicate()
 
-  # disabled: save the job stdout and stderr
-  if False:
-    stdout = open('/tmp/cmsRun%06d.out' % job.pid, 'w')
+  # save the job stdout and stderr
+  if logdir:
+    stdout = open(logdir + '/cmsRun%06d.out' % job.pid, 'w')
     stdout.write(out)
     stdout.close()
-    stderr = open('/tmp/cmsRun%06d.err' % job.pid, 'w')
+    stderr = open(logdir + '/cmsRun%06d.err' % job.pid, 'w')
     stderr.write(err)
     stderr.close()
 
@@ -126,6 +126,7 @@ def multiCmsRun(
     data = None,                    # a file-like object for storing performance measurements
     header = True,                  # write a header before the measurements
     warmup = True,                  # whether to run an extra warm-up job
+    logdir = None,                  # a relative or absolute path where to store individual jobs' log files, or None
     verbose = False,                # whether to print extra messages
     plumbing = False,               # print output in a machine-readable format
     events = -1,                    # number of events to process (default: unlimited)
@@ -209,8 +210,15 @@ def multiCmsRun(
     # warm up to cache the binaries, data and conditions
     jobdir = os.path.join(workdir, "warmup")
     os.mkdir(jobdir)
+    # recreate logs' directory
+    if logdir is not None:
+      thislogdir = logdir + '/warmup'
+      shutil.rmtree(thislogdir, True)
+      os.makedirs(thislogdir)
+    else:
+      thislogdir = None
     print 'Warming up'
-    thread = singleCmsRun(config.name, jobdir, verbose, cpu_assignment[0], gpu_assignment[0], *args)
+    thread = singleCmsRun(config.name, jobdir, thislogdir, verbose, cpu_assignment[0], gpu_assignment[0], *args)
     thread.start()
     thread.join()
     print
@@ -230,11 +238,18 @@ def multiCmsRun(
     times       = [ None ] * jobs
     fits        = [ None ] * jobs
     job_threads = [ None ] * jobs
+    # recreate logs' directory
+    if logdir is not None:
+      thislogdir = logdir + '/step%04d' % repeat
+      shutil.rmtree(thislogdir, True)
+      os.makedirs(thislogdir)
+    else:
+      thislogdir = None
     # create work threads
     for job in range(jobs):
       jobdir = os.path.join(workdir, "step%02d_part%02d" % (repeat, job))
       os.mkdir(jobdir)
-      job_threads[job] = singleCmsRun(config.name, jobdir, verbose, cpu_assignment[job], gpu_assignment[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, verbose, cpu_assignment[job], gpu_assignment[job], *args)
 
     # start all threads
     for thread in job_threads:
