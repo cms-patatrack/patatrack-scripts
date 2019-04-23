@@ -223,16 +223,31 @@ def multiCmsRun(
     thread.join()
     print
 
-  print 'Running %d times over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (repeats, "all" if events == -1 else str(events), jobs, threads, streams, gpus_per_job)
-  throughput = [ None ] * repeats
-  error      = [ None ] * repeats
-  overlap    = [ None ] * repeats
+  if repeats > 1:
+    n_times = '%d times' % repeats
+  elif repeats == 1:
+    n_times = 'once'
+  else:
+    n_times = 'continuously'
+
+  if events >= 0:
+    n_events = str(events)
+  else:
+    n_events = 'all'
+
+  print 'Running %s over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job)
+
+  # store the values to compute the average throughput over the repetitions
+  if repeats > 1 and not plumbing:
+    throughputs = [ None ] * repeats
+    overlaps    = [ None ] * repeats
 
   # store performance points for later analysis
   if data and header:
     data.write('%s, %s, %s, %s, %s, %s, %s, %s\n' % ('jobs', 'overlap', 'CPU threads per job', 'EDM streams per job', 'GPUs per jobs', 'number of events', 'average throughput (ev/s)', 'uncertainty (ev/s)'))
 
-  for repeat in range(repeats):
+  iterations = xrange(repeats) if repeats > 0 else itertools.count()
+  for repeat in iterations:
     # run the jobs reading the output to extract the event throughput
     events      = None
     times       = [ None ] * jobs
@@ -268,29 +283,35 @@ def multiCmsRun(
       fits[job]  = stats.linregress(times[job], events)
 
     # measure the average throughput
-    used_events        = events[-1] - events[0]
-    throughput[repeat] = sum(fit.slope for fit in fits)
-    error[repeat]      = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
+    used_events = events[-1] - events[0]
+    throughput  = sum(fit.slope for fit in fits)
+    error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
     if jobs > 1:
       # if running more than on job in parallel, estimate and print the overlap among them
-      overlap[repeat] = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
+      overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
       # machine- or human-readable formatting
       formatting = '%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else u'%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
-      print formatting % (throughput[repeat], error[repeat], used_events, overlap[repeat] * 100.)
+      print formatting % (throughput, error, used_events, overlap * 100.)
     else:
-      overlap[repeat] = 1.
+      overlap = 1.
       # machine- or human-readable formatting
       formatting = '%8.1f\t%8.1f\t%d' if plumbing else u'%8.1f \u00b1 %5.1f ev/s (%d events)'
-      print formatting % (throughput[repeat], error[repeat], used_events)
+      print formatting % (throughput, error, used_events)
+
+    # store the values to compute the average throughput over the repetitions
+    if repeats > 1 and not plumbing:
+      throughputs[repeat] = throughput
+      overlaps[repeat]    = overlap
 
     # store performance points for later analysis
     if data:
-      data.write('%d, %f, %d, %d, %d, %d, %f, %f\n' % (jobs, overlap[repeat], threads, streams, gpus_per_job, used_events, throughput[repeat], error[repeat]))
+      data.write('%d, %f, %d, %d, %d, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, used_events, throughput, error))
+
 
   # compute the average throughput over the repetitions
   if repeats > 1 and not plumbing:
     # filter out the jobs with an overlap lower than 95%
-    values = [ throughput[i] for i in range(repeats) if overlap[i] >= 0.95 ]
+    values = [ throughputs[i] for i in range(repeats) if overlaps[i] >= 0.95 ]
     n = len(values)
     throughput = np.average(values)
     error = np.std(values, ddof=1)
