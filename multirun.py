@@ -228,7 +228,7 @@ def multiCmsRun(
   elif repeats == 1:
     n_times = 'once'
   else:
-    n_times = 'continuously'
+    n_times = 'indefinitely'
 
   if events >= 0:
     n_events = str(events)
@@ -289,6 +289,8 @@ def multiCmsRun(
     if jobs > 1:
       # if running more than on job in parallel, estimate and print the overlap among them
       overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
+      if overlap < 0.:
+        overlap = 0.
       # machine- or human-readable formatting
       formatting = '%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else u'%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
       print formatting % (throughput, error, used_events, overlap * 100.)
