@@ -249,7 +249,7 @@ def multiCmsRun(
   iterations = xrange(repeats) if repeats > 0 else itertools.count()
   for repeat in iterations:
     # run the jobs reading the output to extract the event throughput
-    events      = None
+    events      = [ None ] * jobs
     times       = [ None ] * jobs
     fits        = [ None ] * jobs
     job_threads = [ None ] * jobs
@@ -271,19 +271,31 @@ def multiCmsRun(
       thread.start()
 
     # join all threads
+    inconsistent = [ False ] * jobs
     for job, thread in enumerate(job_threads):
       # implicitly wait for the thread to complete
       (e, t) = thread.result.get()
-      if events is None:
-        events = np.array(e)
+      events[job] = np.array(e)
+      times[job]  = np.array(t)
+      fits[job]   = stats.linregress(times[job], events[job])
+      # check for inconsistent event counts
+      if len(events[0]) != len(events[job]) or any(events[0] != events[job]):
+        inconsistent[job] = True
+
+    # ignore inconsistent jobs
+    job = 0
+    while job < jobs:
+      if inconsistent[job]:
+        del times[job]
+        del fits[job]
+        del inconsistent[job]
+        jobs -= 1
+        print 'Inconsistent measurement points for job %d, will be skipped'
       else:
-        # check for inconsistent event counts
-        assert(len(events) == len(e) and all(events == e))
-      times[job] = np.array(t)
-      fits[job]  = stats.linregress(times[job], events)
+        job += 1
 
     # measure the average throughput
-    used_events = events[-1] - events[0]
+    used_events = events[0][-1] - events[0][0]
     throughput  = sum(fit.slope for fit in fits)
     error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
     if jobs > 1:
