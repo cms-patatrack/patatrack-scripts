@@ -26,14 +26,14 @@ if __name__ == "__main__":
     'warmup'              : True,
     'events'              : 4200,
     'repeats'             : 4,
-    'jobs'                : None,       # if None, set the number of jobs to fill all available CPUs
-    'threads'             : None,       # overridden by the scan
-    'streams'             : None,       # if None, set to the number of threads for each step of the scan
+    'jobs'                : 1,          # if None, set the number of jobs to fill all available CPUs
+    'threads'             : None,       # if None, overridden by the scan
+    'streams'             : None,       # if None, overridden by the scan
     'gpus_per_job'        : 1,
     'allow_hyperthreading': False,      # this determined the number and afifnity of the CPUs used by each job
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
-    'logdir'              : 'logs',     # relative or absolute path, or None to disable storing the logs
+    'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
   }
 
   # options specific to scan

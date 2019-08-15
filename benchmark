@@ -29,9 +29,10 @@ if __name__ == "__main__":
     'threads'             : 8,          # per job
     'streams'             : 8,          # per job
     'gpus_per_job'        : 1,          # per job
-    'allow_hyperthreading': True,       # this has no effect if set_cpu_affinity is False
-    'set_cpu_affinity'    : False,
+    'allow_hyperthreading': False,      # this has no effect if set_cpu_affinity is False
+    'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
+    'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
   }
 
   info()
