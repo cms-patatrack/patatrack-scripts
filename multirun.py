@@ -284,13 +284,14 @@ def multiCmsRun(
 
     # ignore inconsistent jobs
     job = 0
-    while job < jobs:
+    valid_jobs = jobs
+    while job < valid_jobs:
       if inconsistent[job]:
         del times[job]
         del fits[job]
         del inconsistent[job]
-        jobs -= 1
-        print 'Inconsistent measurement points for job %d, will be skipped'
+        valid_jobs -= 1
+        print 'Inconsistent measurement points for job %d, will be skipped' % job
       else:
         job += 1
 
@@ -298,7 +299,7 @@ def multiCmsRun(
     used_events = events[0][-1] - events[0][0]
     throughput  = sum(fit.slope for fit in fits)
     error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
-    if jobs > 1:
+    if valid_jobs > 1:
       # if running more than on job in parallel, estimate and print the overlap among them
       overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
       if overlap < 0.:
