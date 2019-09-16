@@ -147,6 +147,8 @@ def multiCmsRun(
   process.maxEvents.input = cms.untracked.int32( events )
 
   # print a message every 100 events
+  if not 'MessageLogger' in process.__dict__:
+    process.load("FWCore.MessageLogger.MessageLogger_cfi")
   process.MessageLogger.cerr.FwkReport.reportEvery = 100
 
   # make a full dump of the configuration, to make changes to the number of threads, streams, etc.
