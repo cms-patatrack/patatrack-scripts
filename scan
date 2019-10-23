@@ -38,8 +38,8 @@ if __name__ == "__main__":
 
   # options specific to scan
   steps = None                          # list, or None to make a linear scan from min_step to max_step
-  min_step  =  1                        # minimum is 1
-  max_step  = 32                        # None to guess based on the number of available cores (or threads) and concurrent jobs
+  min_step  =  4                        # minimum is 1
+  max_step  = 12                        # None to guess based on the number of available cores (or threads) and concurrent jobs
 
   ##############################################################################
 
