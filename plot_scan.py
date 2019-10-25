@@ -13,6 +13,7 @@ import seaborn as sns
 options = {
   'normalise':  False,              # True: plot the average throughput per job, False: plot the total throughput
   'x axis':    'EDM streams',       # 'CPU threads per job', 'CPU threads', 'EDM streams per job', 'EDM streams'
+  'zoom':       False,              # True: zoom the Y axis to show the only the data, False: start the Y axis at 0
 }
 
 # workaround for seaborn 0.9.0
@@ -22,7 +23,8 @@ def fix_plot_range(plot):
   xmax = max(data)
   step = (xmax - xmin) * 0.05
   plot.set(xlim=(xmin - step, xmax + step))
-  plot.set(ylim=(0, None))
+  if not options['zoom']:
+    plot.set(ylim=(0, None))
 
 
 sns.set(style={                     # based on 'whitegrid'
