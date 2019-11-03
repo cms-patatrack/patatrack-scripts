@@ -38,38 +38,29 @@ def get_cpu_info(cache = True):
   if cache and __cache:
     return __cache
 
-  try:
-    cpuinfo = open('/proc/cpuinfo')
-  except:
-    (type, value, traceback) = sys.exc_info()
-    sys.stderr.write('error: %s\n' % value)
-
   cpus = collections.OrderedDict()
 
-  proc = None
-  core = None
-  sock = None
-  model = ''
-  for line in cpuinfo:
+  model = 'Unknown CPU'
+  description = subprocess.Popen(['lscpu', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+  for line in description.splitlines():
+    if 'Model name:' in line:
+      model = line.split(':')[1].strip()
+      break
 
-    if re.match('processor\s*:', line):
-      proc = int(re.match('processor\s*: (\d+)', line).group(1))
-    elif re.match('core id\s*:', line):
-      core = int(re.match('core id\s*: (\d+)', line).group(1))
-    elif re.match('physical id\s*:', line):
-      sock = int(re.match('physical id\s*: (\d+)', line).group(1))
-    elif re.match('model name\s*:',  line):
-      model = re.match('model name\s*: (.*)', line).group(1).strip()
+  devices = subprocess.Popen(['lscpu', '-b', '-p=SOCKET,NODE,CORE,CPU'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+  for line in devices.splitlines():
+    if '#' in line:
+      continue
 
-    elif line.strip() == '':
-      if not sock in cpus:
-        cpus[sock] = CPUInfo(sock, model)
-      cpus[sock].add_core(core, proc)
+    sock, numa, core, proc = line.split(',')
+    sock = int(sock) if sock else 0
+    numa = int(numa) if numa else sock      # currently unused
+    core = int(core) if core else 0
+    proc = int(proc) if proc else 0
 
-      proc = None
-      core = None
-      sock = None
-      model = ''
+    if not sock in cpus:
+      cpus[sock] = CPUInfo(sock, model)
+    cpus[sock].add_core(core, proc)
 
   for cpu in cpus.values():
     cpu.finalise()
