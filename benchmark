@@ -2,8 +2,10 @@
 
 import sys
 import os
+import copy
 
 from multirun import *
+import FWCore.ParameterSet.Config as cms
 
 
 if __name__ == "__main__":
@@ -11,14 +13,11 @@ if __name__ == "__main__":
     # FIXME print a meaningful error message
     sys.exit(1)
 
-  # TODO parse arguments and options from the command line
-  if len(sys.argv) > 1:
-    config = sys.argv[1]
-    process = parseProcess(config)
-  else:
+  if len(sys.argv) == 1:
     # FIXME print a meaningful error message
     sys.exit(1)
 
+  # TODO parse arguments and options from the command line
   options = {
     'verbose'             : False,
     'plumbing'            : False,
@@ -35,5 +34,21 @@ if __name__ == "__main__":
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
   }
 
+  run_io_benchmark = True
+
   info()
-  multiCmsRun(process, **options)
+
+  for config in sys.argv[1:]:
+    process = parseProcess(config)
+
+    if run_io_benchmark:
+      print 'Benchmarking only I/O'
+      io = copy.deepcopy(process)
+      io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
+      io.path = cms.Path(io.hltGetRaw)
+      io.schedule = cms.Schedule(io.path)
+      multiCmsRun(io, **options)
+      run_io_benchmark = False
+
+    print 'Benchmarking %s' % config
+    multiCmsRun(process, **options)
