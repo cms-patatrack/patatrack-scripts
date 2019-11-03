@@ -29,14 +29,14 @@ def get_gpu_info(cache = True):
   if 'CUDA_VISIBLE_DEVICES' in os.environ:
     visible = [int(device) for device in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
 
-  devices = subprocess.Popen(['nvidia-smi', '-L'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+  devices = subprocess.Popen(['cudaComputeCapabilities', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
   for line in devices.splitlines():
-    matches = re.match(r'GPU ([0-9]+): (.*)', line)
+    matches = re.match(r' *([0-9]+) +([0-9]+\.[0-9]) +(.*)', line)
     if matches:
       device = int(matches.group(1))
-      if visible and not device in visible:
-        continue
-      model  = matches.group(2).strip()
+      if visible:
+        device = visible[device]
+      model  = matches.group(3).strip()
       gpus[device] = GPUInfo(device, model)
 
   if cache:
