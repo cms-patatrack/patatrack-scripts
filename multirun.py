@@ -30,7 +30,7 @@ gpus = get_gpu_info()
 epoch = datetime.now()
 
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, verbose = False, cpus = None, gpus = None, *args):
+def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, cpus = None, gpus = None, *args):
   # optionally set CPU affinity
   command = ('cmsRun', filename) + args
   if cpus is not None:
@@ -57,6 +57,11 @@ def singleCmsRun(filename, workdir, logdir = None, verbose = False, cpus = None,
     stderr = open(logdir + '/cmsRun%06d.err' % job.pid, 'w')
     stderr.write(err)
     stderr.close()
+
+    # keep
+    for name in keep:
+      if os.path.isfile(workdir + '/' + name):
+        shutil.move(workdir + '/' + name, '%s/cmsRun%06d_%s' % (logdir, job.pid, name))
 
   if (job.returncode < 0):
     print "The underlying cmsRun job was killed by signal %d" % -job.returncode
@@ -127,6 +132,7 @@ def multiCmsRun(
     header = True,                  # write a header before the measurements
     warmup = True,                  # whether to run an extra warm-up job
     logdir = None,                  # a relative or absolute path where to store individual jobs' log files, or None
+    keep = [],                      # output files to be kept
     verbose = False,                # whether to print extra messages
     plumbing = False,               # print output in a machine-readable format
     events = -1,                    # number of events to process (default: unlimited)
@@ -221,7 +227,7 @@ def multiCmsRun(
     else:
       thislogdir = None
     print 'Warming up'
-    thread = singleCmsRun(config.name, jobdir, thislogdir, verbose, cpu_assignment[0], gpu_assignment[0], *args)
+    thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpu_assignment[0], gpu_assignment[0], *args)
     thread.start()
     thread.join()
     print
@@ -267,7 +273,7 @@ def multiCmsRun(
     for job in range(jobs):
       jobdir = os.path.join(workdir, "step%02d_part%02d" % (repeat, job))
       os.mkdir(jobdir)
-      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, verbose, cpu_assignment[job], gpu_assignment[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, keep, verbose, cpu_assignment[job], gpu_assignment[job], *args)
 
     # start all threads
     for thread in job_threads:

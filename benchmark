@@ -32,6 +32,7 @@ if __name__ == "__main__":
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
+    'keep'                : [],         # output files to be kept
   }
 
   run_io_benchmark = True

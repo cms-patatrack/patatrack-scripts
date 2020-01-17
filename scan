@@ -34,6 +34,7 @@ if __name__ == "__main__":
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
+    'keep'                : []          # list of files produced by the jobs to be kept (requires logdir)
   }
 
   # options specific to scan
