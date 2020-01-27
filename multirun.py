@@ -9,6 +9,7 @@ import math
 import shutil
 import subprocess
 import tempfile
+from collections import defaultdict
 from datetime import datetime
 import numpy as np
 from scipy import stats
@@ -65,15 +66,21 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
 
   if (job.returncode < 0):
     print "The underlying cmsRun job was killed by signal %d" % -job.returncode
-    print
-    print err
-    os._exit(job.returncode)
+    if logdir:
+      print "See %s/cmsRun%06d.out and %s/cmsRun%06d.err for the full logs" % (logdir, job.pid, logdir, job.pid)
+    else:
+      print "The last lines of the error log are:"
+      print "\n".join(err.splitlines()[-10:])
+    return None
 
   elif (job.returncode > 0):
     print "The underlying cmsRun job failed with return code %d" % job.returncode
-    print
-    print err
-    os._exit(job.returncode)
+    if logdir:
+      print "See %s/cmsRun%06d.out and %s/cmsRun%06d.err for the full logs" % (logdir, job.pid, logdir, job.pid)
+    else:
+      print "The last lines of the error log are:"
+      print "\n".join(err.splitlines()[-10:])
+    return None
 
   elif (job.returncode == 0):
     if verbose:
@@ -101,7 +108,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
       events.append(event)
       times.append((time - epoch).total_seconds())
 
-  return (events, times)
+  return (tuple(events), tuple(times))
 
 
 def parseProcess(filename):
@@ -247,6 +254,7 @@ def multiCmsRun(
   print 'Running %s over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job)
 
   # store the values to compute the average throughput over the repetitions
+  failed = [ False ] * repeats
   if repeats > 1 and not plumbing:
     throughputs = [ None ] * repeats
     overlaps    = [ None ] * repeats
@@ -280,35 +288,48 @@ def multiCmsRun(
       thread.start()
 
     # join all threads
-    inconsistent = [ False ] * jobs
+    failed_jobs = [ False ] * jobs
+    consistent_events = defaultdict(int)
     for job, thread in enumerate(job_threads):
       # implicitly wait for the thread to complete
-      (e, t) = thread.result.get()
+      result = thread.result.get()
+      if result is None:
+        failed_jobs[job] = True
+        continue
+      (e, t) = result
+      consistent_events[tuple(e)] += 1
       events[job] = np.array(e)
       times[job]  = np.array(t)
       fits[job]   = stats.linregress(times[job], events[job])
-      # check for inconsistent event counts
-      if len(events[0]) != len(events[job]) or any(events[0] != events[job]):
+
+    # if any jobs failed, skip the whole measurement
+    if any(failed_jobs):
+      print '%d %s failed, this measurement will be ignored' % (sum(failed_jobs), 'jobs' if sum(failed_jobs) > 1 else 'job')
+      failed[repeat] = True
+      continue
+
+    reference_events = np.array(sorted(consistent_events, key = consistent_events.get, reverse = True)[0])
+
+    # check for jobs with inconsistent events
+    inconsistent = [ False ] * jobs
+    for job in range(jobs):
+      if (len(events[job]) != len(reference_events)) or any(events[job] != reference_events):
+        print 'Inconsistent measurement points for job %d, will be skipped' % job
         inconsistent[job] = True
 
-    # ignore inconsistent jobs
-    job = 0
-    valid_jobs = jobs
-    while job < valid_jobs:
+    # delete data from inconsistent jobs
+    for job in range(jobs-1, -1, -1):
       if inconsistent[job]:
         del times[job]
         del fits[job]
         del inconsistent[job]
-        valid_jobs -= 1
-        print 'Inconsistent measurement points for job %d, will be skipped' % job
-      else:
-        job += 1
+        jobs -= 1
 
     # measure the average throughput
-    used_events = events[0][-1] - events[0][0]
+    used_events = reference_events[-1] - reference_events[0]
     throughput  = sum(fit.slope for fit in fits)
     error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
-    if valid_jobs > 1:
+    if jobs > 1:
       # if running more than on job in parallel, estimate and print the overlap among them
       overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
       if overlap < 0.:
