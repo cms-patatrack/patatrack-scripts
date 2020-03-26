@@ -86,27 +86,33 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     if verbose:
       print "The underlying cmsRun job completed successfully"
 
-  # when analysing the logs, skip the first event
-  skip_first = True
-
   # analyse the output
   date_format  = '%d-%b-%Y %H:%M:%S.%f'
-  line_pattern = re.compile(r'Begin processing the (\d+)(st|nd|rd|th) record. Run (\d+), Event (\d+), LumiSection (\d+) on stream (\d+) at (\d\d-...-\d\d\d\d \d\d:\d\d:\d\d.\d\d\d) .*')
-  first_entry = skip_first
+  # expected format
+  #     100, 18-Mar-2020 12:16:39.172836 CET
+  begin_pattern = re.compile(r'%MSG-i ThroughputService:  *AfterModEndJob')
+  line_pattern  = re.compile(r' *(\d+), (\d+-...-\d\d\d\d \d\d:\d\d:\d\d.\d\d\d\d\d\d) .*')
 
   events = []
   times  = []
-  # usually MessageLogger is configured to write to stderr
+  matching = False
   for line in err.splitlines():
+    # look for the begin marker
+    if not matching:
+      if begin_pattern.match(line):
+        matching = True
+      continue
+
     matches = line_pattern.match(line)
-    if matches:
-      if first_entry:
-        first_entry = False
-        continue
-      event = int(matches.group(1))
-      time  = datetime.strptime(matches.group(7) + '000', date_format)
-      events.append(event)
-      times.append((time - epoch).total_seconds())
+    # check for the end of the events list
+    if not matches:
+      break
+
+    # read the matching lines
+    event = int(matches.group(1))
+    time  = datetime.strptime(matches.group(2), date_format)
+    events.append(event)
+    times.append((time - epoch).total_seconds())
 
   return (tuple(events), tuple(times))
 
@@ -160,10 +166,13 @@ def multiCmsRun(
   process.maxEvents.input = cms.untracked.int32( events )
 
   # print a message every 100 events
-  if not 'MessageLogger' in process.__dict__:
-    process.load("FWCore.MessageLogger.MessageLogger_cfi")
-  process.MessageLogger.cerr.FwkReport.limit = 10000000
-  process.MessageLogger.cerr.FwkReport.reportEvery = 100
+  if not 'ThroughputService' in process.__dict__:
+    process.load("HLTrigger.Timer.ThroughputService_cfi.py")
+    process.ThroughputService.enableDQM = False
+  process.ThroughputService.printEventSummary = True
+  if events > -1:
+    process.ThroughputService.eventRange = events
+  process.ThroughputService.eventResolution = 100
 
   # make a full dump of the configuration, to make changes to the number of threads, streams, etc.
   workdir = tempfile.mkdtemp(prefix = 'cmsRun')
