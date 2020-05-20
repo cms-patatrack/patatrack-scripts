@@ -167,7 +167,7 @@ def multiCmsRun(
 
   # print a message every 100 events
   if not 'ThroughputService' in process.__dict__:
-    process.load("HLTrigger.Timer.ThroughputService_cfi.py")
+    process.load("HLTrigger.Timer.ThroughputService_cfi")
     process.ThroughputService.enableDQM = False
   process.ThroughputService.printEventSummary = True
   if events > -1:
