@@ -13,17 +13,16 @@ import seaborn as sns
 options = {
   'normalise':  False,              # True: plot the average throughput per job, False: plot the total throughput
   'x axis':    'EDM streams',       # 'CPU threads per job', 'CPU threads', 'EDM streams per job', 'EDM streams'
-  'zoom':       False,              # True: zoom the Y axis to show the only the data, False: start the Y axis at 0
 }
 
 # workaround for seaborn 0.9.0
-def fix_plot_range(plot):
+def fix_plot_range(plot, zoom = False):
   data = plot.data[plot._x_var]
   xmin = min(data)
   xmax = max(data)
   step = (xmax - xmin) * 0.05
   plot.set(xlim=(xmin - step, xmax + step))
-  if not options['zoom']:
+  if not zoom:
     plot.set(ylim=(0, None))
 
 
@@ -105,7 +104,13 @@ plot = sns.lmplot(
   legend = True,
   legend_out = True,                # show the legend to the right of the plot
   truncate = False,
-  ci = 95,
+  ci = 95.,
   )
+
+# zoomed-in version of the plot
+fix_plot_range(plot, zoom = True)   # workaround for seaborn 0.9.0
+plot.savefig('zoom.png')
+
+# full Y axis
 fix_plot_range(plot)                # workaround for seaborn 0.9.0
 plot.savefig('plot.png')
