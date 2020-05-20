@@ -27,7 +27,10 @@ def get_gpu_info(cache = True):
 
   visible = None
   if 'CUDA_VISIBLE_DEVICES' in os.environ:
-    visible = [int(device) for device in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
+    if os.environ['CUDA_VISIBLE_DEVICES'] == '':
+      visible = []
+    else:
+      visible = [int(device) for device in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
 
   devices = subprocess.Popen(['cudaComputeCapabilities', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
   for line in devices.splitlines():
@@ -47,7 +50,9 @@ def get_gpu_info(cache = True):
 
 if __name__ == "__main__":
   gpus = get_gpu_info()
-  print '%d visible NVIDIA GPUs:' % len(gpus)
-  for gpu in gpus.values():
-    print '  %d: %s' % (gpu.device, gpu.model)
-
+  if gpus:
+    print '%d visible NVIDIA GPUs:' % len(gpus)
+    for gpu in gpus.values():
+      print '  %d: %s' % (gpu.device, gpu.model)
+  else:
+    print 'No visible NVIDIA GPUs'
