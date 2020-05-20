@@ -48,8 +48,14 @@ if __name__ == "__main__":
       io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
       io.path = cms.Path(io.hltGetRaw)
       io.schedule = cms.Schedule(io.path)
+      if 'PrescaleService' in io.__dict__:
+        del io.PrescaleService
+      io_options = copy.deepcopy(options)
+      io_options['logdir'] = None
+      io_options['keep'] = []
       multiCmsRun(io, **options)
       run_io_benchmark = False
+      print
 
     print 'Benchmarking %s' % config
     multiCmsRun(process, **options)
