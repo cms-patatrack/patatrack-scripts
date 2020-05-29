@@ -47,44 +47,47 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
   if verbose:
     print cmdline
 
-  job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-  (out, err) = job.communicate()
+  # run a cmsRun job, redirecting standard output and error to files
+  lognames = ('stdout', 'stderr')
+  logfiles = tuple('%s/%s' % (workdir, name) for name in  ('stdout', 'stderr'))
+  stdout = open(logfiles[0], 'w')
+  stderr = open(logfiles[1], 'w')
+  job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
+  job.communicate()
+  stdout.close()
+  stderr.close()
 
-  # save the job stdout and stderr
+  # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
-    stdout = open(logdir + '/cmsRun%06d.out' % job.pid, 'w')
-    stdout.write(out)
-    stdout.close()
-    stderr = open(logdir + '/cmsRun%06d.err' % job.pid, 'w')
-    stderr.write(err)
-    stderr.close()
-
-    # keep
-    for name in keep:
+    for name in list(keep) + list(lognames):
       if os.path.isfile(workdir + '/' + name):
-        shutil.move(workdir + '/' + name, '%s/cmsRun%06d_%s' % (logdir, job.pid, name))
+        shutil.move(workdir + '/' + name, '%s/cmsRun%06d.%s' % (logdir, job.pid, name))
+    logfiles = tuple('%s/cmsRun%06d.%s' % (logdir, job.pid, name) for name in  lognames)
+
+  stderr = open(logfiles[1], 'r')
 
   if (job.returncode < 0):
     print "The underlying cmsRun job was killed by signal %d" % -job.returncode
-    if logdir:
-      print "See %s/cmsRun%06d.out and %s/cmsRun%06d.err for the full logs" % (logdir, job.pid, logdir, job.pid)
-    else:
-      print "The last lines of the error log are:"
-      print "\n".join(err.splitlines()[-10:])
+    print
+    print "The last lines of the error log are:"
+    print "\n".join(stderr.readlines()[-10:])
+    print
+    print "See %s and %s for the full logs" % logfiles
+    stderr.close()
     return None
 
   elif (job.returncode > 0):
     print "The underlying cmsRun job failed with return code %d" % job.returncode
-    if logdir:
-      print "See %s/cmsRun%06d.out and %s/cmsRun%06d.err for the full logs" % (logdir, job.pid, logdir, job.pid)
-    else:
-      print "The last lines of the error log are:"
-      print "\n".join(err.splitlines()[-10:])
+    print
+    print "The last lines of the error log are:"
+    print "\n".join(stderr.readlines()[-10:])
+    print
+    print "See %s and %s for the full logs" % logfiles
+    stderr.close()
     return None
 
-  elif (job.returncode == 0):
-    if verbose:
-      print "The underlying cmsRun job completed successfully"
+  if verbose:
+    print "The underlying cmsRun job completed successfully"
 
   # analyse the output
   date_format  = '%d-%b-%Y %H:%M:%S.%f'
@@ -96,7 +99,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
   events = []
   times  = []
   matching = False
-  for line in err.splitlines():
+  for line in stderr:
     # look for the begin marker
     if not matching:
       if begin_pattern.match(line):
@@ -114,6 +117,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     events.append(event)
     times.append((time - epoch).total_seconds())
 
+  stderr.close()
   return (tuple(events), tuple(times))
 
 
@@ -145,7 +149,7 @@ def multiCmsRun(
     header = True,                  # write a header before the measurements
     warmup = True,                  # whether to run an extra warm-up job
     logdir = None,                  # a relative or absolute path where to store individual jobs' log files, or None
-    keep = [],                      # output files to be kept
+    keep = [],                      # additional output files to be kept
     verbose = False,                # whether to print extra messages
     plumbing = False,               # print output in a machine-readable format
     events = -1,                    # number of events to process (default: unlimited)
