@@ -246,6 +246,7 @@ def multiCmsRun(
     thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpu_assignment[0], gpu_assignment[0], *args)
     thread.start()
     thread.join()
+    shutil.rmtree(jobdir)
     print
 
   if repeats > 1:
@@ -316,6 +317,11 @@ def multiCmsRun(
       print '%d %s failed, this measurement will be ignored' % (sum(failed_jobs), 'jobs' if sum(failed_jobs) > 1 else 'job')
       failed[repeat] = True
       continue
+
+    # if all jobs were successful, delete the temporary directories
+    for job in range(jobs):
+      jobdir = os.path.join(workdir, "step%02d_part%02d" % (repeat, job))
+      shutil.rmtree(jobdir)
 
     reference_events = np.array(sorted(consistent_events, key = consistent_events.get, reverse = True)[0])
 
