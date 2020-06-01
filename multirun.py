@@ -70,7 +70,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     print "The underlying cmsRun job was killed by signal %d" % -job.returncode
     print
     print "The last lines of the error log are:"
-    print "\n".join(stderr.readlines()[-10:])
+    print "".join(stderr.readlines()[-10:])
     print
     print "See %s and %s for the full logs" % logfiles
     stderr.close()
@@ -80,7 +80,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     print "The underlying cmsRun job failed with return code %d" % job.returncode
     print
     print "The last lines of the error log are:"
-    print "\n".join(stderr.readlines()[-10:])
+    print "".join(stderr.readlines()[-10:])
     print
     print "See %s and %s for the full logs" % logfiles
     stderr.close()
