@@ -171,12 +171,13 @@ def multiCmsRun(
 
   # print a message every 100 events
   if not 'ThroughputService' in process.__dict__:
-    process.load("HLTrigger.Timer.ThroughputService_cfi")
-    process.ThroughputService.enableDQM = False
-  process.ThroughputService.printEventSummary = True
+    process.ThroughputService = cms.Service('ThroughputService',
+      enableDQM = cms.untracked.bool(False),
+    )
+  process.ThroughputService.printEventSummary = cms.untracked.bool(True)
+  process.ThroughputService.eventResolution = cms.untracked.uint32(100)
   if events > -1:
-    process.ThroughputService.eventRange = events
-  process.ThroughputService.eventResolution = 100
+    process.ThroughputService.eventRange = cms.untracked.uint32(events)
 
   # make a full dump of the configuration, to make changes to the number of threads, streams, etc.
   workdir = tempfile.mkdtemp(prefix = 'cmsRun')
