@@ -317,7 +317,7 @@ def multiCmsRun(
     for job, thread in enumerate(job_threads):
       # implicitly wait for the thread to complete
       result = thread.result.get()
-      if result is None:
+      if result is None or not(all(result)):
         failed_jobs[job] = True
         continue
       (e, t) = result
