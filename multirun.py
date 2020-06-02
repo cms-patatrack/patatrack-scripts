@@ -179,6 +179,15 @@ def multiCmsRun(
   if events > -1:
     process.ThroughputService.eventRange = cms.untracked.uint32(events)
 
+  if not 'MessageLogger' in process.__dict__:
+    process.load('FWCore.MessageService.MessageLogger_cfi')
+  if not 'ThroughputService' in process.MessageLogger.categories:
+    process.MessageLogger.categories.append('ThroughputService')
+  process.MessageLogger.cerr.ThroughputService = cms.untracked.PSet(
+    limit = cms.untracked.int32(10000000),
+    reportEvery = cms.untracked.int32(1)
+  )
+
   # make a full dump of the configuration, to make changes to the number of threads, streams, etc.
   workdir = tempfile.mkdtemp(prefix = 'cmsRun')
   config = open(os.path.join(workdir, 'process.py'), 'w')
