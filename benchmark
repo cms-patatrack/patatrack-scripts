@@ -53,7 +53,7 @@ if __name__ == "__main__":
       io_options = copy.deepcopy(options)
       io_options['logdir'] = None
       io_options['keep'] = []
-      multiCmsRun(io, **options)
+      multiCmsRun(io, **io_options)
       run_io_benchmark = False
       print
 
