@@ -2,6 +2,7 @@
 
 import sys
 import os
+import copy
 
 from multirun import *
 
@@ -34,8 +35,10 @@ if __name__ == "__main__":
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
-    'keep'                : []          # list of files produced by the jobs to be kept (requires logdir)
+    'keep'                : [],         # list of files produced by the jobs to be kept (requires logdir)
   }
+
+  run_io_benchmark = False     # run i/o benchmark   
 
   # options specific to scan
   steps = None                          # list, or None to make a linear scan from min_step to max_step
@@ -46,6 +49,16 @@ if __name__ == "__main__":
 
   # print a system overview
   info()
+
+  if run_io_benchmark :
+    print 'Benchmarking only I/O'
+    print ' NB: your config file will not be run, just I/O test will be'
+    io = copy.deepcopy(process)
+    io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
+    io.path = cms.Path(io.hltGetRaw)
+    io.schedule = cms.Schedule(io.path)
+    if 'PrescaleService' in io.__dict__:
+      del io.PrescaleService
 
   # save scan results to 'scan.csv'
   options['data'] = open('scan.csv', 'w', 1)
@@ -75,7 +88,10 @@ if __name__ == "__main__":
     step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
 
     # run
-    multiCmsRun(process, **step_opt)
+    if run_io_benchmark :
+      multiCmsRun(io, **step_opt)
+    else :
+      multiCmsRun(process, **step_opt)
 
     # warm up only once
     step_opt['warmup'] = False
