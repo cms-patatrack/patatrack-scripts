@@ -73,6 +73,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     print "".join(stderr.readlines()[-10:])
     print
     print "See %s and %s for the full logs" % logfiles
+    sys.stdout.flush()
     stderr.close()
     return None
 
@@ -83,11 +84,13 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     print "".join(stderr.readlines()[-10:])
     print
     print "See %s and %s for the full logs" % logfiles
+    sys.stdout.flush()
     stderr.close()
     return None
 
   if verbose:
     print "The underlying cmsRun job completed successfully"
+    sys.stdout.flush()
 
   # analyse the output
   date_format  = '%d-%b-%Y %H:%M:%S.%f'
@@ -257,6 +260,7 @@ def multiCmsRun(
     else:
       thislogdir = None
     print 'Warming up'
+    sys.stdout.flush()
     thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpu_assignment[0], gpu_assignment[0], *args)
     thread.start()
     thread.join()
@@ -276,6 +280,7 @@ def multiCmsRun(
     n_events = 'all'
 
   print 'Running %s over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job)
+  sys.stdout.flush()
 
   # store the values to compute the average throughput over the repetitions
   failed = [ False ] * repeats
@@ -329,6 +334,7 @@ def multiCmsRun(
     # if any jobs failed, skip the whole measurement
     if any(failed_jobs):
       print '%d %s failed, this measurement will be ignored' % (sum(failed_jobs), 'jobs' if sum(failed_jobs) > 1 else 'job')
+      sys.stdout.flush()
       failed[repeat] = True
       continue
 
@@ -344,6 +350,7 @@ def multiCmsRun(
     for job in range(jobs):
       if (len(events[job]) != len(reference_events)) or any(events[job] != reference_events):
         print 'Inconsistent measurement points for job %d, will be skipped' % job
+        sys.stdout.flush()
         inconsistent[job] = True
 
     # delete data from inconsistent jobs
@@ -371,6 +378,7 @@ def multiCmsRun(
       # machine- or human-readable formatting
       formatting = '%8.1f\t%8.1f\t%d' if plumbing else u'%8.1f \u00b1 %5.1f ev/s (%d events)'
       print formatting % (throughput, error, used_events)
+    sys.stdout.flush()
 
     # store the values to compute the average throughput over the repetitions
     if repeats > 1 and not plumbing:
@@ -405,6 +413,7 @@ def multiCmsRun(
       formatting = u'%8.1f (single measurement with the highest overlap)'
       print formatting % (value, )
     print
+    sys.stdout.flush()
 
   # delete the temporary work dir
   shutil.rmtree(workdir)
@@ -420,6 +429,7 @@ def info():
   for gpu in gpus.values():
     print '  %d: %s' % (gpu.device, gpu.model)
   print
+  sys.stdout.flush()
 
 
 if __name__ == "__main__":
