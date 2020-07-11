@@ -24,7 +24,7 @@ if __name__ == "__main__":
     'verbose'             : False,
     'plumbing'            : False,
     'warmup'              : True,
-    'events'              : 4200,
+    'events'              : 4100,
     'repeats'             : 4,
     'jobs'                : 1,          # if None, set the number of jobs to fill all available CPUs
     'threads'             : None,       # if None, overridden by the scan
@@ -39,7 +39,7 @@ if __name__ == "__main__":
 
   # options specific to scan
   steps = None                          # list, or None to make a linear scan from min_step to max_step
-  min_step  =  4                        # minimum is 1
+  min_step  =  6                        # minimum is 1
   max_step  = 12                        # None to guess based on the number of available cores (or threads) and concurrent jobs
 
   ##############################################################################
