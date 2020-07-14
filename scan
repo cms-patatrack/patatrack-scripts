@@ -25,7 +25,7 @@ if __name__ == "__main__":
     'verbose'             : False,
     'plumbing'            : False,
     'warmup'              : True,
-    'events'              : 4200,
+    'events'              : 4100,
     'repeats'             : 4,
     'jobs'                : 1,          # if None, set the number of jobs to fill all available CPUs
     'threads'             : None,       # if None, overridden by the scan
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
   # options specific to scan
   steps = None                          # list, or None to make a linear scan from min_step to max_step
-  min_step  =  4                        # minimum is 1
+  min_step  =  6                        # minimum is 1
   max_step  = 12                        # None to guess based on the number of available cores (or threads) and concurrent jobs
 
   ##############################################################################
@@ -52,7 +52,6 @@ if __name__ == "__main__":
 
   if run_io_benchmark :
     print 'Benchmarking only I/O'
-    print ' NB: your config file will not be run, just I/O test will be'
     io = copy.deepcopy(process)
     io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
     io.path = cms.Path(io.hltGetRaw)
@@ -81,6 +80,10 @@ if __name__ == "__main__":
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)
 
+  options['data'] = open('scan_io.csv', 'w', 1)
+  step_opt_io = dict(options)
+
+
   for step in steps:
     # update the options for each step
     step_opt['threads'] = options['threads'] if options['threads'] is not None else step
@@ -89,9 +92,16 @@ if __name__ == "__main__":
 
     # run
     if run_io_benchmark :
-      multiCmsRun(io, **step_opt)
-    else :
-      multiCmsRun(process, **step_opt)
+      print ">>> running I/O <<<"
+      # update the options for each step
+      step_opt_io['threads'] = options['threads'] if options['threads'] is not None else step
+      step_opt_io['streams'] = options['streams'] if options['streams'] is not None else step
+      step_opt_io['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
+      # run
+      multiCmsRun(io, **step_opt_io)
+      print ">>> running config <<<"
+      
+    multiCmsRun(process, **step_opt)
 
     # warm up only once
     step_opt['warmup'] = False
