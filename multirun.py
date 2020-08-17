@@ -412,6 +412,8 @@ def multiCmsRun(
     else:
       formatting = u'%8.1f (single measurement with the highest overlap)'
       print formatting % (value, )
+
+  if not plumbing:
     print
     sys.stdout.flush()
 
