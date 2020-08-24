@@ -2,6 +2,7 @@
 
 import sys
 import os
+import copy
 
 from multirun import *
 
@@ -34,8 +35,10 @@ if __name__ == "__main__":
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
-    'keep'                : []          # list of files produced by the jobs to be kept (requires logdir)
+    'keep'                : [],         # list of files produced by the jobs to be kept (requires logdir)
   }
+
+  run_io_benchmark = False     # run i/o benchmark   
 
   # options specific to scan
   steps = None                          # list, or None to make a linear scan from min_step to max_step
@@ -46,6 +49,15 @@ if __name__ == "__main__":
 
   # print a system overview
   info()
+
+  if run_io_benchmark :
+    print 'Benchmarking only I/O'
+    io = copy.deepcopy(process)
+    io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
+    io.path = cms.Path(io.hltGetRaw)
+    io.schedule = cms.Schedule(io.path)
+    if 'PrescaleService' in io.__dict__:
+      del io.PrescaleService
 
   # save scan results to 'scan.csv'
   options['data'] = open('scan.csv', 'w', 1)
@@ -68,6 +80,10 @@ if __name__ == "__main__":
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)
 
+  options['data'] = open('scan_io.csv', 'w', 1)
+  step_opt_io = dict(options)
+
+
   for step in steps:
     # update the options for each step
     step_opt['threads'] = options['threads'] if options['threads'] is not None else step
@@ -75,6 +91,16 @@ if __name__ == "__main__":
     step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
 
     # run
+    if run_io_benchmark :
+      print ">>> running I/O <<<"
+      # update the options for each step
+      step_opt_io['threads'] = options['threads'] if options['threads'] is not None else step
+      step_opt_io['streams'] = options['streams'] if options['streams'] is not None else step
+      step_opt_io['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
+      # run
+      multiCmsRun(io, **step_opt_io)
+      print ">>> running config <<<"
+      
     multiCmsRun(process, **step_opt)
 
     # warm up only once
