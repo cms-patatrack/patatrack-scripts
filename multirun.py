@@ -46,6 +46,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
 
   if verbose:
     print cmdline
+    sys.stdout.flush()
 
   # run a cmsRun job, redirecting standard output and error to files
   lognames = ('stdout', 'stderr')
