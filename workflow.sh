@@ -1,44 +1,32 @@
 #! /bin/bash
 
-# change --mc to --data
-# change conditions to 102X_dataRun2_HLT_v2
-# change number of events to 4200
-# remove Validation sequences
-# for profiling, add one of
-#   --customise RecoPixelVertexing/Configuration/customizePixelTracksForProfiling.customizePixelTracksForProfiling
-#   --customise RecoPixelVertexing/Configuration/customizePixelTracksForProfiling.customizePixelTracksForProfilingDisableConversion
-#   --customise RecoPixelVertexing/Configuration/customizePixelTracksForProfiling.customizePixelTracksForProfilingDisableTransfer
-# add the customisations below
+# create the Pixel-only workflow for running on CPU over 2018 MC samples with "ideal" conditions
+runTheMatrix.py -j 0 -t 16 --command='--conditions auto:phase1_2018_design' -l 10824.5
 
-# step 3
-cmsDriver.py step3 \
-    --data \
-    --era Run2_2018 \
-    --geometry DB:Extended \
-    --conditions 102X_dataRun2_HLT_v2 \
-    -s RAW2DIGI:RawToDigi_pixelOnly,RECO:reconstruction_pixelTrackingOnly,DQM:@pixelTrackingOnlyDQM \
-    --procModifiers gpu \
-    -n 4200 \
-    --nThreads 8 \
-    --runUnscheduled \
-    --filein file:step2.root \
-    --fileout file:step3.root \
-    --datatier GEN-SIM-RECO,DQMIO \
-    --eventcontent RECOSIM,DQM \
-    --python_filename step3.py \
-    --no_exec
+cp 10824.5_*/step3_*.py profile_pixel-only_CPU.py
+cat >> profile_pixel-only_CPU.py << @EOF
 
-cat >> step3.py <<@EOF
+# load the CUDA service, but disable it for running on CPU
+process.CUDAService = cms.Service("CUDAService",
+    enabled = cms.untracked.bool(False)
+)
+
+# customise the configuration for profiling the Pixel-only workflow on CPU
+from RecoPixelVertexing.Configuration.customizePixelTracksSoAonCPU import customizePixelTracksSoAonCPUForProfiling
+process = customizePixelTracksSoAonCPUForProfiling(process)
 
 # load data using the DAQ source
 del process.source
 process.load('sourceFromPixelRaw_cff')
 
-# do not run the Riemann fit
-process.pixelTracksHitQuadruplets.doRiemannFit = False
+# the raw data do not have the random number state
+del process.RandomNumberGeneratorService.restoreStateLabel
 
-# print a message every 100 events
-process.MessageLogger.cerr.FwkReport.reportEvery = 100
+# build triplets and run the broken line fit
+process.caHitNtupletCUDA.minHitsPerNtuplet = 3
+process.caHitNtupletCUDA.includeJumpingForwardDoublets = True
+process.caHitNtupletCUDA.useRiemannFit = False
+
 # report CUDAService messages
 process.MessageLogger.categories.append("CUDAService")
 
@@ -47,48 +35,27 @@ process.options.wantSummary = cms.untracked.bool( True )
 @EOF
 
 
-# step 4
-cmsDriver.py step4 \
-    --data \
-    --scenario pp \
-    --era Run2_2018 \
-    --geometry DB:Extended \
-    --conditions 102X_dataRun2_HLT_v2 \
-    -s HARVESTING:@pixelTrackingOnlyDQM \
-    -n 4200 \
-    --filetype DQM \
-    --filein file:step3_inDQM.root \
-    --fileout file:step4.root \
-    --python_filename step4.py \
-    --no_exec
+# create the Pixel-only workflow for running on GPU over 2018 MC samples with "ideal" conditions:
+runTheMatrix.py -j 0 -t 16 --command='--conditions auto:phase1_2018_design' -l 10824.502
 
-# profiling
-cmsDriver.py profile \
-    --data \
-    --era Run2_2018 \
-    --geometry DB:Extended \
-    --conditions 102X_dataRun2_HLT_v2 \
-    -s RAW2DIGI:RawToDigi_pixelOnly,RECO:reconstruction_pixelTrackingOnly,DQM:@pixelTrackingOnlyDQM \
-    --procModifiers gpu \
-    --customise RecoPixelVertexing/Configuration/customizePixelTracksForProfiling.customizePixelTracksForProfilingDisableTransfer \
-    -n 4200 \
-    --nThreads 8 \
-    --runUnscheduled \
-    --filein file:step2.root \
-    --fileout file:step3.root \
-    --datatier GEN-SIM-RECO,DQMIO \
-    --eventcontent RECOSIM,DQM \
-    --python_filename profile.py \
-    --no_exec
+cp 10824.502_*/step3_*.py profile_pixel-only_GPU.py
+cat >> profile_pixel-only_GPU.py << @EOF
 
-cat >> profile.py <<@EOF
+# customise the configuration for profiling the Pixel-only workflow on GPU
+from RecoPixelVertexing.Configuration.customizePixelTracksForProfiling import customizePixelTracksForProfilingGPUOnly
+process = customizePixelTracksForProfilingGPUOnly(process)
 
 # load data using the DAQ source
 del process.source
 process.load('sourceFromPixelRaw_cff')
 
-# do not run the Riemann fit
-process.pixelTracksHitQuadruplets.doRiemannFit = False
+# the raw data do not have the random number state
+del process.RandomNumberGeneratorService.restoreStateLabel
+
+# build triplets and run the broken line fit
+process.caHitNtupletCUDA.minHitsPerNtuplet = 3
+process.caHitNtupletCUDA.includeJumpingForwardDoublets = True
+process.caHitNtupletCUDA.useRiemannFit = False
 
 # report CUDAService messages
 process.MessageLogger.categories.append("CUDAService")
