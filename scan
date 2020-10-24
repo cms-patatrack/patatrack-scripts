@@ -24,13 +24,13 @@ if __name__ == "__main__":
     'verbose'             : False,
     'plumbing'            : False,
     'warmup'              : True,
-    'events'              : 4100,
-    'repeats'             : 4,
+    'events'              : 10100,
+    'repeats'             : 3,
     'jobs'                : 1,          # if None, set the number of jobs to fill all available CPUs
     'threads'             : None,       # if None, overridden by the scan
     'streams'             : None,       # if None, overridden by the scan
     'gpus_per_job'        : 1,
-    'allow_hyperthreading': False,      # this determined the number and afifnity of the CPUs used by each job
+    'allow_hyperthreading': False,      # this determines the number and afifnity of the CPUs used by each job
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
@@ -38,9 +38,9 @@ if __name__ == "__main__":
   }
 
   # options specific to scan
-  steps = None                          # list, or None to make a linear scan from min_step to max_step
-  min_step  =  6                        # minimum is 1
-  max_step  = 12                        # None to guess based on the number of available cores (or threads) and concurrent jobs
+  steps = [ 6, 8, 10, 12 ]              # list, or None to make a linear scan from min_step to max_step
+  min_step  = 1                         # minimum is 1
+  max_step  = None                      # None to guess based on the number of available cores (or threads) and concurrent jobs
 
   ##############################################################################
 
