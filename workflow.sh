@@ -39,8 +39,6 @@ process.pixelTracksHitQuadruplets.doRiemannFit = False
 
 # print a message every 100 events
 process.MessageLogger.cerr.FwkReport.reportEvery = 100
-# report CUDAService messages
-process.MessageLogger.categories.append("CUDAService")
 
 # print the summary
 process.options.wantSummary = cms.untracked.bool( True )
@@ -89,9 +87,6 @@ process.load('sourceFromPixelRaw_cff')
 
 # do not run the Riemann fit
 process.pixelTracksHitQuadruplets.doRiemannFit = False
-
-# report CUDAService messages
-process.MessageLogger.categories.append("CUDAService")
 
 # print the summary
 process.options.wantSummary = cms.untracked.bool( True )

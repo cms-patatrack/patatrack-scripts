@@ -185,8 +185,6 @@ def multiCmsRun(
 
   if not 'MessageLogger' in process.__dict__:
     process.load('FWCore.MessageService.MessageLogger_cfi')
-  if not 'ThroughputService' in process.MessageLogger.categories:
-    process.MessageLogger.categories.append('ThroughputService')
   process.MessageLogger.cerr.ThroughputService = cms.untracked.PSet(
     limit = cms.untracked.int32(10000000),
     reportEvery = cms.untracked.int32(1)
