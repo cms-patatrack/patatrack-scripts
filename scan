@@ -26,11 +26,11 @@ if __name__ == "__main__":
     'warmup'              : True,
     'events'              : 10100,
     'repeats'             : 3,
-    'jobs'                : 1,          # if None, set the number of jobs to fill all available CPUs
+    'jobs'                : 2,          # if None, set the number of jobs to fill all available CPUs
     'threads'             : None,       # if None, overridden by the scan
     'streams'             : None,       # if None, overridden by the scan
     'gpus_per_job'        : 1,
-    'allow_hyperthreading': False,      # this determines the number and afifnity of the CPUs used by each job
+    'allow_hyperthreading': True,       # this determines the number and afifnity of the CPUs used by each job
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
