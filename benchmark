@@ -22,13 +22,13 @@ if __name__ == "__main__":
     'verbose'             : False,
     'plumbing'            : False,
     'warmup'              : True,
-    'events'              : 4100,
-    'repeats'             : 4,
-    'jobs'                : 1,
-    'threads'             : 8,                          # per job
-    'streams'             : 8,                          # per job
+    'events'              : 10100,
+    'repeats'             : 3,
+    'jobs'                : 2,
+    'threads'             : 10,                         # per job
+    'streams'             : 10,                         # per job
     'gpus_per_job'        : 1,                          # per job
-    'allow_hyperthreading': False,                      # this has no effect if set_cpu_affinity is False
+    'allow_hyperthreading': True,                       # this has no effect if set_cpu_affinity is False
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : 'logs',                     # relative or absolute path, or None to disable storing the logs
