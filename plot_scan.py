@@ -2,6 +2,45 @@
 
 import sys
 import os.path
+import argparse
+
+parser = argparse.ArgumentParser(
+  description = 'Plot the data points in one or more CSV files produced by the "scan" script.',
+  formatter_class = argparse.ArgumentDefaultsHelpFormatter
+)
+
+parser.add_argument('files',
+  metavar = 'FILE',
+  nargs = '+',
+  type = argparse.FileType('r'),
+  help = 'data files to plot')
+
+parser.add_argument('-o', '--output',
+  metavar = 'FILE',
+  default = 'plot.png',
+  type = argparse.FileType('wb', 0),
+  help = 'save the plot to FILE')
+
+parser.add_argument('-z', '--zoom',
+  metavar = 'FILE',
+  default = argparse.SUPPRESS,
+  nargs = '?',
+  const = 'zoom.png',
+  type = argparse.FileType('wb', 0),
+  help = 'produce a zoomed-in version of the plot and save it to FILE, or zoom.png if FILE is omitted (default: do not produce a zoomed plot)')
+
+parser.add_argument('-n', '--normalise',
+  action = 'store_true',
+  default = False,
+  help = 'plot the average throughput per job instead of the total throughput across all jobs')
+
+parser.add_argument('-x', '--x-axis',
+  choices = ['CPU threads per job', 'CPU threads', 'EDM streams per job', 'EDM streams'],
+  default = 'EDM streams',
+  help = 'plot vs the number of CPU threads or EDM streams, overall or per job')
+
+args = parser.parse_args()
+
 
 import numpy as np
 import pandas as pd
@@ -64,16 +103,16 @@ sns.set_palette([
 
 data = []
 
-for filename in sys.argv[1:]:
+for file in args.files:
   # expected file format:
   #   jobs, overlap, CPU threads per job, EDM streams per job, GPUs per jobs, number of events, average throughput (ev/s), uncertainty (ev/s)
   #   2, 0.994863, 6, 6, 1, 4000, 3591.314398, 1.665309
   #   ...
-  values = pd.read_csv(filename).rename(columns=lambda x: x.strip())
+  values = pd.read_csv(file).rename(columns=lambda x: x.strip())
 
   # if the data does not have a name, build it from the file name
   if not 'name' in values:
-    name = os.path.basename(filename)
+    name = os.path.basename(file.name)
     if '.' in name:
       i = name.rindex('.')
       name = name[:i]
@@ -84,7 +123,7 @@ df = pd.concat(data, ignore_index = True)
 del data
 
 # normalise to the number of jobs
-if options['normalise']:
+if args.normalise:
   df['average throughput (ev/s)'] /= df['jobs']
   df['uncertainty (ev/s)']        /= df['jobs']
 
@@ -94,7 +133,7 @@ df['EDM streams'] =  df['EDM streams per job'] * df['jobs']
 
 plot = sns.lmplot(
   data = df,
-  x = options['x axis'],
+  x = args.x_axis,
   y = 'average throughput (ev/s)',
   fit_reg = True,                   # estimate and plot a regression model
   order = 4,                        # polynomial fit
@@ -108,9 +147,10 @@ plot = sns.lmplot(
   )
 
 # zoomed-in version of the plot
-fix_plot_range(plot, zoom = True)   # workaround for seaborn 0.9.0
-plot.savefig('zoom.png')
+if 'zoom' in args:
+  fix_plot_range(plot, zoom = True)
+  plot.savefig(args.zoom)
 
 # full Y axis
-fix_plot_range(plot)                # workaround for seaborn 0.9.0
-plot.savefig('plot.png')
+fix_plot_range(plot)
+plot.savefig(args.output)
