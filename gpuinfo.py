@@ -51,8 +51,8 @@ def get_gpu_info(cache = True):
 if __name__ == "__main__":
   gpus = get_gpu_info()
   if gpus:
-    print '%d visible NVIDIA GPUs:' % len(gpus)
-    for gpu in gpus.values():
-      print '  %d: %s' % (gpu.device, gpu.model)
+    print('%d visible NVIDIA GPUs:' % len(gpus))
+    for gpu in list(gpus.values()):
+      print('  %d: %s' % (gpu.device, gpu.model))
   else:
-    print 'No visible NVIDIA GPUs'
+    print('No visible NVIDIA GPUs')

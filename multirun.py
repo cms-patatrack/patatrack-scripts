@@ -45,7 +45,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     cmdline = 'CUDA_VISIBLE_DEVICES=' + gpus + ' ' + cmdline
 
   if verbose:
-    print cmdline
+    print(cmdline)
     sys.stdout.flush()
 
   # run a cmsRun job, redirecting standard output and error to files
@@ -68,29 +68,29 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
   stderr = open(logfiles[1], 'r')
 
   if (job.returncode < 0):
-    print "The underlying cmsRun job was killed by signal %d" % -job.returncode
-    print
-    print "The last lines of the error log are:"
-    print "".join(stderr.readlines()[-10:])
-    print
-    print "See %s and %s for the full logs" % logfiles
+    print("The underlying cmsRun job was killed by signal %d" % -job.returncode)
+    print()
+    print("The last lines of the error log are:")
+    print("".join(stderr.readlines()[-10:]))
+    print()
+    print("See %s and %s for the full logs" % logfiles)
     sys.stdout.flush()
     stderr.close()
     return None
 
   elif (job.returncode > 0):
-    print "The underlying cmsRun job failed with return code %d" % job.returncode
-    print
-    print "The last lines of the error log are:"
-    print "".join(stderr.readlines()[-10:])
-    print
-    print "See %s and %s for the full logs" % logfiles
+    print("The underlying cmsRun job failed with return code %d" % job.returncode)
+    print()
+    print("The last lines of the error log are:")
+    print("".join(stderr.readlines()[-10:]))
+    print()
+    print("See %s and %s for the full logs" % logfiles)
     sys.stdout.flush()
     stderr.close()
     return None
 
   if verbose:
-    print "The underlying cmsRun job completed successfully"
+    print("The underlying cmsRun job completed successfully")
     sys.stdout.flush()
 
   # analyse the output
@@ -131,7 +131,7 @@ def parseProcess(filename):
   try:
     handle = open(filename, 'r')
   except:
-    print "Failed to open %s: %s" % (filename, sys.exc_info()[1])
+    print("Failed to open %s: %s" % (filename, sys.exc_info()[1]))
     sys.exit(1)
 
   # make the behaviour consistent with 'cmsRun file.py'
@@ -140,7 +140,7 @@ def parseProcess(filename):
     pycfg = imp.load_source('pycfg', filename, handle)
     process = pycfg.process
   except:
-    print "Failed to parse %s: %s" % (filename, sys.exc_info()[1])
+    print("Failed to parse %s: %s" % (filename, sys.exc_info()[1]))
     sys.exit(1)
 
   handle.close()
@@ -207,17 +207,17 @@ def multiCmsRun(
     #     [ 0,2,4,6 ], [ 8,10,12,14 ], [ 16,18,20,22 ], [ 24,26,1,3 ], [ 5,7,9,11 ], [ 13,15,17,19 ], [ 21,23,25,27 ]
     # TODO: set the processor assignment as an argument, to support arbitrary splitting
     if allow_hyperthreading:
-      cpu_list = list(itertools.chain(*(map(str, cpu.hardware_threads) for cpu in cpus.values())))
+      cpu_list = list(itertools.chain(*(list(map(str, cpu.hardware_threads)) for cpu in list(cpus.values()))))
     else:
-      cpu_list = list(itertools.chain(*(map(str, cpu.physical_processors) for cpu in cpus.values())))
+      cpu_list = list(itertools.chain(*(list(map(str, cpu.physical_processors)) for cpu in list(cpus.values()))))
 
     # if all the jobs fit within individual sockets, assing jobs to sockets in a round-robin
     if len(cpu_list) // len(cpus) // threads * len(cpus) >= jobs:
       cpu_assignment = [ list() for i in range(jobs) ]
       if allow_hyperthreading:
-        available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in cpus.values() ]
+        available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in list(cpus.values()) ]
       else:
-        available_cpus = [ copy.copy(cpu.physical_processors) for cpu in cpus.values() ]
+        available_cpus = [ copy.copy(cpu.physical_processors) for cpu in list(cpus.values()) ]
       for job in range(jobs):
         socket = job % len(cpus)
         cpu_assignment[job] = ','.join(map(str, available_cpus[socket][0:threads]))
@@ -242,9 +242,9 @@ def multiCmsRun(
     #   - otherwise, assign GPUs to jobs in a round-robin fashon
     # TODO: set the GPU assignment as an argument, to support arbitrary splitting
     if gpus_per_job >= len(gpus):
-      gpu_assignment = [ ','.join(map(str, gpus.keys())) for i in range(jobs) ]
+      gpu_assignment = [ ','.join(map(str, list(gpus.keys()))) for i in range(jobs) ]
     else:
-      gpu_repeated   = map(str, itertools.islice(itertools.cycle(gpus.keys()), jobs * gpus_per_job))
+      gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
       gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
 
   if warmup:
@@ -258,13 +258,13 @@ def multiCmsRun(
       os.makedirs(thislogdir)
     else:
       thislogdir = None
-    print 'Warming up'
+    print('Warming up')
     sys.stdout.flush()
     thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpu_assignment[0], gpu_assignment[0], *args)
     thread.start()
     thread.join()
     shutil.rmtree(jobdir)
-    print
+    print()
 
   if repeats > 1:
     n_times = '%d times' % repeats
@@ -278,7 +278,7 @@ def multiCmsRun(
   else:
     n_events = 'all'
 
-  print 'Running %s over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job)
+  print('Running %s over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job))
   sys.stdout.flush()
 
   # store the values to compute the average throughput over the repetitions
@@ -291,7 +291,7 @@ def multiCmsRun(
   if data and header:
     data.write('%s, %s, %s, %s, %s, %s, %s, %s\n' % ('jobs', 'overlap', 'CPU threads per job', 'EDM streams per job', 'GPUs per jobs', 'number of events', 'average throughput (ev/s)', 'uncertainty (ev/s)'))
 
-  iterations = xrange(repeats) if repeats > 0 else itertools.count()
+  iterations = range(repeats) if repeats > 0 else itertools.count()
   for repeat in iterations:
     # run the jobs reading the output to extract the event throughput
     events      = [ None ] * jobs
@@ -332,7 +332,7 @@ def multiCmsRun(
 
     # if any jobs failed, skip the whole measurement
     if any(failed_jobs):
-      print '%d %s failed, this measurement will be ignored' % (sum(failed_jobs), 'jobs' if sum(failed_jobs) > 1 else 'job')
+      print('%d %s failed, this measurement will be ignored' % (sum(failed_jobs), 'jobs' if sum(failed_jobs) > 1 else 'job'))
       sys.stdout.flush()
       failed[repeat] = True
       continue
@@ -348,7 +348,7 @@ def multiCmsRun(
     inconsistent = [ False ] * jobs
     for job in range(jobs):
       if (len(events[job]) != len(reference_events)) or any(events[job] != reference_events):
-        print 'Inconsistent measurement points for job %d, will be skipped' % job
+        print('Inconsistent measurement points for job %d, will be skipped' % job)
         sys.stdout.flush()
         inconsistent[job] = True
 
@@ -370,13 +370,13 @@ def multiCmsRun(
       if overlap < 0.:
         overlap = 0.
       # machine- or human-readable formatting
-      formatting = '%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else u'%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
-      print formatting % (throughput, error, used_events, overlap * 100.)
+      formatting = '%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
+      print(formatting % (throughput, error, used_events, overlap * 100.))
     else:
       overlap = 1.
       # machine- or human-readable formatting
-      formatting = '%8.1f\t%8.1f\t%d' if plumbing else u'%8.1f \u00b1 %5.1f ev/s (%d events)'
-      print formatting % (throughput, error, used_events)
+      formatting = '%8.1f\t%8.1f\t%d' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events)'
+      print(formatting % (throughput, error, used_events))
     sys.stdout.flush()
 
     # store the values to compute the average throughput over the repetitions
@@ -401,19 +401,19 @@ def multiCmsRun(
       # no jobs with an overlap > 95%, use the "best" one
       value = throughputs[overlaps.index(max(overlaps))]
       error = float('nan')
-    print ' --------------------'
+    print(' --------------------')
     if n == repeats:
-      formatting = u'%8.1f \u00b1 %5.1f ev/s'
-      print formatting % (value, error)
+      formatting = '%8.1f \u00b1 %5.1f ev/s'
+      print(formatting % (value, error))
     elif n > 0:
-      formatting = u'%8.1f \u00b1 %5.1f ev/s (based on %d measurements)'
-      print formatting % (value, error, n)
+      formatting = '%8.1f \u00b1 %5.1f ev/s (based on %d measurements)'
+      print(formatting % (value, error, n))
     else:
-      formatting = u'%8.1f (single measurement with the highest overlap)'
-      print formatting % (value, )
+      formatting = '%8.1f (single measurement with the highest overlap)'
+      print(formatting % (value, ))
 
   if not plumbing:
-    print
+    print()
     sys.stdout.flush()
 
   # delete the temporary work dir
@@ -421,15 +421,15 @@ def multiCmsRun(
 
 
 def info():
-  print '%d CPUs:' % len(cpus)
-  for cpu in cpus.values():
-    print '  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads))
-  print
+  print('%d CPUs:' % len(cpus))
+  for cpu in list(cpus.values()):
+    print('  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads)))
+  print()
 
-  print '%d visible NVIDIA GPUs:' % len(gpus)
-  for gpu in gpus.values():
-    print '  %d: %s' % (gpu.device, gpu.model)
-  print
+  print('%d visible NVIDIA GPUs:' % len(gpus))
+  for gpu in list(gpus.values()):
+    print('  %d: %s' % (gpu.device, gpu.model))
+  print()
   sys.stdout.flush()
 
 

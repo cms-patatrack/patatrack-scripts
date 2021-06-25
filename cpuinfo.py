@@ -21,7 +21,7 @@ class CPUInfo(object):
       self.cores[core] = [ thread ]
 
   def finalise(self):
-    for core in self.cores.values():
+    for core in list(self.cores.values()):
       self.physical_processors.append(core[0])
       self.hardware_threads.extend(core)
     self.physical_processors.sort()
@@ -62,7 +62,7 @@ def get_cpu_info(cache = True):
       cpus[sock] = CPUInfo(sock, model)
     cpus[sock].add_core(core, proc)
 
-  for cpu in cpus.values():
+  for cpu in list(cpus.values()):
     cpu.finalise()
 
   if cache:
@@ -73,8 +73,8 @@ def get_cpu_info(cache = True):
 
 if __name__ == "__main__":
   cpus = get_cpu_info()
-  print '%d CPUs:' % len(cpus)
-  for cpu in cpus.values():
-    print '  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads))
-    print '      cores: %s' % ', '.join(map(str, cpu.physical_processors))
-    print '      HT\'s:  %s' % ', '.join(map(str, cpu.hardware_threads))
+  print('%d CPUs:' % len(cpus))
+  for cpu in list(cpus.values()):
+    print('  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads)))
+    print('      cores: %s' % ', '.join(map(str, cpu.physical_processors)))
+    print('      HT\'s:  %s' % ', '.join(map(str, cpu.hardware_threads)))

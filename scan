@@ -54,16 +54,16 @@ if __name__ == "__main__":
   # check the available cpus
   cpus = get_cpu_info()
   if options['allow_hyperthreading']:
-    count = sum(len(cpu.hardware_threads) for cpu in cpus.values())
+    count = sum(len(cpu.hardware_threads) for cpu in list(cpus.values()))
   else:
-    count = sum(len(cpu.physical_processors) for cpu in cpus.values())
+    count = sum(len(cpu.physical_processors) for cpu in list(cpus.values()))
 
   # use the explicit list of steps, or a linear scan
   if max_step is None:
     max_step = count // options['jobs']
 
   if not steps:
-    steps = range(min_step, max_step + 1)
+    steps = list(range(min_step, max_step + 1))
 
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)

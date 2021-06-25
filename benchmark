@@ -43,7 +43,7 @@ if __name__ == "__main__":
     process = parseProcess(config)
 
     if run_io_benchmark:
-      print 'Benchmarking only I/O'
+      print('Benchmarking only I/O')
       io = copy.deepcopy(process)
       io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
       io.path = cms.Path(io.hltGetRaw)
@@ -55,7 +55,7 @@ if __name__ == "__main__":
       io_options['keep'] = []
       multiCmsRun(io, **io_options)
       run_io_benchmark = False
-      print
+      print()
 
-    print 'Benchmarking %s' % config
+    print('Benchmarking %s' % config)
     multiCmsRun(process, **options)

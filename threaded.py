@@ -2,7 +2,7 @@
 
 def threaded(f, daemon=False):
     import threading
-    import Queue
+    import queue
 
     def wrapper(q, *args, **kwargs):
         '''this function calls the decorated function and puts the result in a queue'''
@@ -12,7 +12,7 @@ def threaded(f, daemon=False):
     def wrap(*args, **kwargs):
         '''this is the function returned from the decorator. It fires off wrapper 
         in a new thread and returns the thread object with the result queue attached'''
-        q = Queue.Queue()
+        q = queue.Queue()
         t = threading.Thread(target=wrapper, args = (q,) + args, kwargs = kwargs)
         t.daemon = daemon
         t.result = q        
