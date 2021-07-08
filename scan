@@ -60,7 +60,10 @@ if __name__ == "__main__":
 
   # use the explicit list of steps, or a linear scan
   if max_step is None:
-    max_step = count // options['jobs']
+    if options['jobs'] is None:
+        max_step = count
+    else:
+        max_step = count // options['jobs']
 
   if not steps:
     steps = list(range(min_step, max_step + 1))
