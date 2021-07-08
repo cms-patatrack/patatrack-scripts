@@ -60,7 +60,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
 
   # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
-    for name in list(keep) + list(lognames):
+    for name in keep + lognames:
       if os.path.isfile(workdir + '/' + name):
         shutil.move(workdir + '/' + name, '%s/cmsRun%06d.%s' % (logdir, job.pid, name))
     logfiles = tuple('%s/cmsRun%06d.%s' % (logdir, job.pid, name) for name in  lognames)
@@ -207,17 +207,17 @@ def multiCmsRun(
     #     [ 0,2,4,6 ], [ 8,10,12,14 ], [ 16,18,20,22 ], [ 24,26,1,3 ], [ 5,7,9,11 ], [ 13,15,17,19 ], [ 21,23,25,27 ]
     # TODO: set the processor assignment as an argument, to support arbitrary splitting
     if allow_hyperthreading:
-      cpu_list = list(itertools.chain(*(list(map(str, cpu.hardware_threads)) for cpu in list(cpus.values()))))
+      cpu_list = list(itertools.chain(*(list(map(str, cpu.hardware_threads)) for cpu in cpus.values())))
     else:
-      cpu_list = list(itertools.chain(*(list(map(str, cpu.physical_processors)) for cpu in list(cpus.values()))))
+      cpu_list = list(itertools.chain(*(list(map(str, cpu.physical_processors)) for cpu in cpus.values())))
 
     # if all the jobs fit within individual sockets, assing jobs to sockets in a round-robin
     if len(cpu_list) // len(cpus) // threads * len(cpus) >= jobs:
       cpu_assignment = [ list() for i in range(jobs) ]
       if allow_hyperthreading:
-        available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in list(cpus.values()) ]
+        available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in cpus.values() ]
       else:
-        available_cpus = [ copy.copy(cpu.physical_processors) for cpu in list(cpus.values()) ]
+        available_cpus = [ copy.copy(cpu.physical_processors) for cpu in cpus.values() ]
       for job in range(jobs):
         socket = job % len(cpus)
         cpu_assignment[job] = ','.join(map(str, available_cpus[socket][0:threads]))
@@ -422,12 +422,12 @@ def multiCmsRun(
 
 def info():
   print('%d CPUs:' % len(cpus))
-  for cpu in list(cpus.values()):
+  for cpu in cpus.values():
     print('  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads)))
   print()
 
   print('%d visible NVIDIA GPUs:' % len(gpus))
-  for gpu in list(gpus.values()):
+  for gpu in gpus.values():
     print('  %d: %s' % (gpu.device, gpu.model))
   print()
   sys.stdout.flush()
