@@ -18,8 +18,8 @@ from scipy import stats
 import FWCore.ParameterSet.Config as cms
 
 # set the output encoding to UTF-8 for pipes and redirects
-from set_output_encoding import *
-set_output_encoding(encoding='utf-8', force=True)
+#from set_output_encoding import *
+#set_output_encoding(encoding='utf-8', force=True)
 
 from cpuinfo import *
 from gpuinfo import *
@@ -49,8 +49,8 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     sys.stdout.flush()
 
   # run a cmsRun job, redirecting standard output and error to files
-  lognames = ('stdout', 'stderr')
-  logfiles = tuple('%s/%s' % (workdir, name) for name in  ('stdout', 'stderr'))
+  lognames = ['stdout', 'stderr']
+  logfiles = ['%s/%s' % (workdir, name) for name in lognames]
   stdout = open(logfiles[0], 'w')
   stderr = open(logfiles[1], 'w')
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
@@ -63,7 +63,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     for name in keep + lognames:
       if os.path.isfile(workdir + '/' + name):
         shutil.move(workdir + '/' + name, '%s/cmsRun%06d.%s' % (logdir, job.pid, name))
-    logfiles = tuple('%s/cmsRun%06d.%s' % (logdir, job.pid, name) for name in  lognames)
+    logfiles = tuple('%s/cmsRun%06d.%s' % (logdir, job.pid, name) for name in lognames)
 
   stderr = open(logfiles[1], 'r')
 

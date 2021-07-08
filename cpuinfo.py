@@ -41,13 +41,13 @@ def get_cpu_info(cache = True):
   cpus = collections.OrderedDict()
 
   model = 'Unknown CPU'
-  description = subprocess.Popen(['lscpu', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+  description = subprocess.Popen(['lscpu', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).communicate()[0]
   for line in description.splitlines():
     if 'Model name:' in line:
       model = line.split(':')[1].strip()
       break
 
-  devices = subprocess.Popen(['lscpu', '-b', '-p=SOCKET,NODE,CORE,CPU'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+  devices = subprocess.Popen(['lscpu', '-b', '-p=SOCKET,NODE,CORE,CPU'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).communicate()[0]
   for line in devices.splitlines():
     if '#' in line:
       continue

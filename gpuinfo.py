@@ -32,7 +32,7 @@ def get_gpu_info(cache = True):
     else:
       visible = [int(device) for device in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
 
-  devices = subprocess.Popen(['cudaComputeCapabilities', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[0]
+  devices = subprocess.Popen(['cudaComputeCapabilities', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).communicate()[0]
   for line in devices.splitlines():
     matches = re.match(r' *([0-9]+) +([0-9]+\.[0-9]) +(.*)', line)
     if matches:
