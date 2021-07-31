@@ -387,14 +387,14 @@ def multiCmsRun(
 
   # compute the average throughput over the repetitions
   if repeats > 1 and not plumbing:
-    # filter out the jobs with an overlap lower than 95%
-    values = [ throughputs[i] for i in range(repeats) if overlaps[i] >= 0.95 ]
+    # filter out the jobs with an overlap lower than 90%
+    values = [ throughputs[i] for i in range(repeats) if overlaps[i] >= 0.90 ]
     n = len(values)
     if n > 0:
       value = np.average(values)
       error = np.std(values, ddof=1)
     else:
-      # no jobs with an overlap > 95%, use the "best" one
+      # no jobs with an overlap > 90%, use the "best" one
       value = throughputs[overlaps.index(max(overlaps))]
       error = float('nan')
     print(' --------------------')
