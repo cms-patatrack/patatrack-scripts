@@ -341,20 +341,19 @@ def multiCmsRun(
     reference_events = np.array(sorted(consistent_events, key = consistent_events.get, reverse = True)[0])
 
     # check for jobs with inconsistent events
-    inconsistent = [ False ] * jobs
+    inconsistent = False
     for job in range(jobs):
       if (len(events[job]) != len(reference_events)) or any(events[job] != reference_events):
-        print('Inconsistent measurement points for job %d, will be skipped' % job)
+        print('Inconsistent measurement points for job %d' % job)
         sys.stdout.flush()
-        inconsistent[job] = True
+        inconsistent = True
 
     # delete data from inconsistent jobs
-    for job in range(jobs-1, -1, -1):
-      if inconsistent[job]:
-        del times[job]
-        del fits[job]
-        del inconsistent[job]
-        jobs -= 1
+    if inconsistent:
+      print ('Inconsistent results detected, this measurement will be ignored')
+      sys.stdout.flush()
+      failed[repeat] = True
+      continue
 
     # measure the average throughput
     used_events = reference_events[-1] - reference_events[0]
