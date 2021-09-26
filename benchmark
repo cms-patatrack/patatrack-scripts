@@ -25,8 +25,8 @@ if __name__ == "__main__":
     'events'              : 10100,
     'repeats'             : 3,
     'jobs'                : 2,
-    'threads'             : 10,                         # per job
-    'streams'             : 10,                         # per job
+    'threads'             : None,                       # per job
+    'streams'             : None,                       # per job
     'gpus_per_job'        : 1,                          # per job
     'allow_hyperthreading': True,                       # this has no effect if set_cpu_affinity is False
     'set_cpu_affinity'    : True,
@@ -38,6 +38,25 @@ if __name__ == "__main__":
   run_io_benchmark = True
 
   info()
+
+  # check the available cpus
+  cpus = get_cpu_info()
+  if options['allow_hyperthreading']:
+    count = sum(len(cpu.hardware_threads) for cpu in cpus.values())
+  else:
+    count = sum(len(cpu.physical_processors) for cpu in cpus.values())
+
+  # autodetermine either the number of jobs ot the nuber of threads per job
+  if options['threads'] is None and options['jobs'] is None:
+    sys.stderr.write('%s: error: either the number of jobs ot the nuber of threads per job must be specified\n' % sys.argv[0])
+  elif options['threads'] is None:
+    options['threads'] = count // options['jobs']
+  elif options['jobs'] is None:
+    options['jobs'] = count // options['threads']
+
+  # the number of streams defaults to the number of threads per job
+  if options['streams'] is None:
+    options['streams'] = options['threads']
 
   for config in sys.argv[1:]:
     process = parseProcess(config)
