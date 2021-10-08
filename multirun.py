@@ -46,7 +46,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
 
   # run a cmsRun job, redirecting standard output and error to files
   lognames = ['stdout', 'stderr']
-  logfiles = ['%s/%s' % (workdir, name) for name in lognames]
+  logfiles = tuple('%s/%s' % (workdir, name) for name in lognames)
   stdout = open(logfiles[0], 'w')
   stderr = open(logfiles[1], 'w')
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
