@@ -350,7 +350,7 @@ def multiCmsRun(
 
     # delete data from inconsistent jobs
     if inconsistent:
-      print ('Inconsistent results detected, this measurement will be ignored')
+      print('Inconsistent results detected, this measurement will be ignored')
       sys.stdout.flush()
       failed[repeat] = True
       continue
@@ -386,26 +386,32 @@ def multiCmsRun(
 
   # compute the average throughput over the repetitions
   if repeats > 1 and not plumbing:
+    # filter out the failed or inconsistent jobs
+    throughputs = [ throughputs[i] for i in range(repeats) if not failed[i] ]
+    overlaps    = [ overlaps[i]    for i in range(repeats) if not failed[i] ]
     # filter out the jobs with an overlap lower than 90%
-    values = [ throughputs[i] for i in range(repeats) if overlaps[i] >= 0.90 ]
+    values      = [ throughputs[i] for i in range(len(throughputs)) if overlaps[i] >= 0.90 ]
     n = len(values)
-    if n > 0:
+    if n > 1:
       value = np.average(values)
       error = np.std(values, ddof=1)
+    elif n > 0:
+      # only a single valid job with an overlap > 90%, use its result
+      value = values[0]
+      error = float('nan')
     else:
-      # no jobs with an overlap > 90%, use the "best" one
+      # no valid jobs with an overlap > 90%, use the "best" one
       value = throughputs[overlaps.index(max(overlaps))]
       error = float('nan')
     print(' --------------------')
     if n == repeats:
-      formatting = '%8.1f \u00b1 %5.1f ev/s'
-      print(formatting % (value, error))
+      print('%8.1f \u00b1 %5.1f ev/s' % (value, error))
+    elif n > 1:
+      print('%8.1f \u00b1 %5.1f ev/s (based on %d measurements)' % (value, error, n))
     elif n > 0:
-      formatting = '%8.1f \u00b1 %5.1f ev/s (based on %d measurements)'
-      print(formatting % (value, error, n))
+      print('%8.1f ev/s (based on a single measurement)' % (value, ))
     else:
-      formatting = '%8.1f (single measurement with the highest overlap)'
-      print(formatting % (value, ))
+      print('%8.1f ev/s (single measurement with the highest overlap)' % (value, ))
 
   if not plumbing:
     print()
