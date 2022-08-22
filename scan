@@ -77,6 +77,13 @@ if __name__ == "__main__":
     step_opt['streams'] = options['streams'] if options['streams'] is not None else step
     step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
 
+    # if the logs are enabled, use a separate directory for each step
+    if options['logdir'] is not None:
+        base = options['logdir']
+        if base:
+            base = base + '/'
+        step_opt['logdir'] = base + 'scan_%d' % step
+
     # run
     multiCmsRun(process, **step_opt)
 
