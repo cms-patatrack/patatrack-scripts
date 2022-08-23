@@ -44,7 +44,8 @@ if __name__ == "__main__":
   min_step  = 1                         # minimum is 1
   max_step  = None                      # None to guess based on the number of available cores (or threads) and concurrent jobs
 
-  ##############################################################################
+  events_extra_per_thread = 0                           # increase by this amount the number of events per thread
+  events_limit = 0                                      # if not 0, limit the total number of events to be processed
 
   # print a system overview
   info()
@@ -94,6 +95,14 @@ if __name__ == "__main__":
         if base:
             base = base + '/'
         step_opt['logdir'] = base + 'scan_%d' % step
+
+    # update the number of events to process based on the number of threads
+    if events_extra_per_thread > 0:
+        step_opt['events'] = options['events'] + events_extra_per_thread * step_opt['threads']
+
+    if events_limit > 0:
+        if step_opt['events'] > events_limit:
+            step_opt['events'] = events_limit
 
     # benchmark reading the input data
     if run_io_benchmark:
