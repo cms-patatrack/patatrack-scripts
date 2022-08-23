@@ -35,8 +35,9 @@ if __name__ == "__main__":
     'keep'                : [ 'resources.json' ],       # additional output files to be kept, along with the logs
   }
 
-  run_io_benchmark = True
+  run_io_benchmark = True                               # measure the throughput for reading the input data
 
+  # print a system overview
   info()
 
   # check the available cpus
@@ -62,17 +63,18 @@ if __name__ == "__main__":
     process = parseProcess(config)
 
     if run_io_benchmark:
+      # prepare a trimmed down configuration for benchmarking only reading the input data
+      io_process = copy.deepcopy(process)
+      io_process.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
+      io_process.path = cms.Path(io_process.hltGetRaw)
+      io_process.schedule = cms.Schedule(io_process.path)
+      if 'PrescaleService' in io_process.__dict__:
+        del io_process.PrescaleService
+
+      # benchmark reading the input data
       print('Benchmarking only I/O')
-      io = copy.deepcopy(process)
-      io.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
-      io.path = cms.Path(io.hltGetRaw)
-      io.schedule = cms.Schedule(io.path)
-      if 'PrescaleService' in io.__dict__:
-        del io.PrescaleService
-      io_options = copy.deepcopy(options)
-      io_options['logdir'] = None
-      io_options['keep'] = []
-      multiCmsRun(io, **io_options)
+      io_options = dict(options, logdir = None, keep = [])
+      multiCmsRun(io_process, **io_options)
       run_io_benchmark = False
       print()
 
