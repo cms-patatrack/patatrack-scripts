@@ -37,6 +37,8 @@ if __name__ == "__main__":
     'keep'                : []          # list of files produced by the jobs to be kept (requires logdir)
   }
 
+  run_io_benchmark = True                               # measure the throughput for reading the input data
+
   # options specific to scan
   steps = [ 6, 8, 10, 12 ]              # list, or None to make a linear scan from min_step to max_step
   min_step  = 1                         # minimum is 1
@@ -68,6 +70,15 @@ if __name__ == "__main__":
   if not steps:
     steps = list(range(min_step, max_step + 1))
 
+  # prepare a trimmed down configuration for benchmarking only reading the input data
+  if run_io_benchmark:
+    io_process = copy.deepcopy(process)
+    io_process.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
+    io_process.path = cms.Path(io_process.hltGetRaw)
+    io_process.schedule = cms.Schedule(io_process.path)
+    if 'PrescaleService' in io_process.__dict__:
+      del io_process.PrescaleService
+
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)
 
@@ -83,6 +94,13 @@ if __name__ == "__main__":
         if base:
             base = base + '/'
         step_opt['logdir'] = base + 'scan_%d' % step
+
+    # benchmark reading the input data
+    if run_io_benchmark:
+      print('Benchmarking only I/O')
+      io_options = dict(step_opt, logdir = None, keep = [], data = None, header = False)
+      multiCmsRun(io_process, **io_options)
+      print()
 
     # run
     multiCmsRun(process, **step_opt)
