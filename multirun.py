@@ -14,7 +14,10 @@ from datetime import datetime
 import numpy as np
 from scipy import stats
 
-# FIXME check that CMSSW_BASE is set
+# check that CMSSW_BASE is set
+if not 'CMSSW_BASE' in os.environ:
+    raise RuntimeError('Please load the CMSSW environment with "cmsenv"')
+
 import FWCore.ParameterSet.Config as cms
 
 from cpuinfo import *
