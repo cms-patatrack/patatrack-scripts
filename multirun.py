@@ -29,6 +29,9 @@ gpus = get_gpu_info()
 
 epoch = datetime.now()
 
+# skip at least this many events at the beginning of a job when measuring the throughput
+skipevents = 300
+
 @threaded
 def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, cpus = None, gpus = None, *args):
   # optionally set CPU affinity
@@ -324,7 +327,12 @@ def multiCmsRun(
         failed_jobs[job] = True
         continue
       (e, t) = result
-      consistent_events[tuple(e)] += 1
+      # skip the entries before skipevents
+      ne = tuple(e[i] for i in range(len(e)) if e[i] >= skipevents)
+      nt = tuple(t[i] for i in range(len(e)) if e[i] >= skipevents)
+      e = ne
+      t = nt
+      consistent_events[e] += 1
       events[job] = np.array(e)
       times[job]  = np.array(t)
       fits[job]   = stats.linregress(times[job], events[job])

@@ -22,7 +22,7 @@ if __name__ == "__main__":
     'verbose'             : False,
     'plumbing'            : False,
     'warmup'              : True,
-    'events'              : 10100,
+    'events'              : 10300,
     'repeats'             : 3,
     'jobs'                : 2,
     'threads'             : None,                       # per job
