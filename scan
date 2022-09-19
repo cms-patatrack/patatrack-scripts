@@ -114,6 +114,9 @@ if __name__ == "__main__":
     # run
     multiCmsRun(process, **step_opt)
 
-    # warm up only once
-    step_opt['warmup'] = False
+    # if the input files do not depend on the job configuration, warm up only once
+    if events_extra_per_thread == 0:
+        step_opt['warmup'] = False
+
+    # print the CSV header only once
     step_opt['header'] = False
