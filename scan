@@ -26,23 +26,24 @@ if __name__ == "__main__":
     'warmup'              : True,
     'events'              : 10100,
     'repeats'             : 3,
-    'jobs'                : 2,          # if None, set the number of jobs to fill all available CPUs
-    'threads'             : None,       # if None, overridden by the scan
-    'streams'             : None,       # if None, overridden by the scan
+    'jobs'                : 2,                          # if None, set the number of jobs to fill all available CPUs
+    'threads'             : None,                       # if None, overridden by the scan
+    'streams'             : None,                       # if None, overridden by the scan
     'gpus_per_job'        : 1,
-    'allow_hyperthreading': True,       # this determines the number and afifnity of the CPUs used by each job
+    'allow_hyperthreading': True,                       # this determines the number and afifnity of the CPUs used by each job
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
-    'logdir'              : None,       # relative or absolute path, or None to disable storing the logs
-    'keep'                : []          # list of files produced by the jobs to be kept (requires logdir)
+    'logdir'              : None,                       # relative or absolute path, or None to disable storing the logs
+    'tmpdir'              : None,                       # temporary directory, or None to use a system dependent default temporary directory
+    'keep'                : []                          # list of files produced by the jobs to be kept (requires logdir)
   }
 
   run_io_benchmark = True                               # measure the throughput for reading the input data
 
   # options specific to scan
-  steps = [ 6, 8, 10, 12 ]              # list, or None to make a linear scan from min_step to max_step
-  min_step  = 1                         # minimum is 1
-  max_step  = None                      # None to guess based on the number of available cores (or threads) and concurrent jobs
+  steps = [ 6, 8, 10, 12 ]                              # list, or None to make a linear scan from min_step to max_step
+  min_step  = 1                                         # minimum is 1
+  max_step  = None                                      # None to guess based on the number of available cores (or threads) and concurrent jobs
 
   events_extra_per_thread = 0                           # increase by this amount the number of events per thread
   events_limit = 0                                      # if not 0, limit the total number of events to be processed

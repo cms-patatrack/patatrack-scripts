@@ -154,6 +154,7 @@ def multiCmsRun(
     data = None,                    # a file-like object for storing performance measurements
     header = True,                  # write a header before the measurements
     warmup = True,                  # whether to run an extra warm-up job
+    tmpdir = None,                  # temporary directory, or None to use a system dependent default temporary directory (default: None)
     logdir = None,                  # a relative or absolute path where to store individual jobs' log files, or None
     keep = [],                      # additional output files to be kept
     verbose = False,                # whether to print extra messages
@@ -192,9 +193,14 @@ def multiCmsRun(
     reportEvery = cms.untracked.int32(1)
   )
 
+  # make sure the explicit temporary directory exists
+  if tmpdir is not None:
+      os.makedirs(tmpdir, exist_ok = True)
+      tmpdir = os.path.realpath(tmpdir)
+
   # make a full dump of the configuration, to make changes to the number of threads, streams, etc.
-  workdir = tempfile.mkdtemp(prefix = 'cmsRun')
-  config = open(os.path.join(workdir, 'process.py'), 'w')
+  workdir = tempfile.TemporaryDirectory(prefix = 'cmsRun', dir = tmpdir)
+  config = open(os.path.join(workdir.name, 'process.py'), 'w')
   config.write(process.dumpPython())
   config.close()
 
@@ -251,7 +257,7 @@ def multiCmsRun(
 
   if warmup:
     # warm up to cache the binaries, data and conditions
-    jobdir = os.path.join(workdir, "warmup")
+    jobdir = os.path.join(workdir.name, "warmup")
     os.mkdir(jobdir)
     # recreate logs' directory
     if logdir is not None:
@@ -309,7 +315,7 @@ def multiCmsRun(
       thislogdir = None
     # create work threads
     for job in range(jobs):
-      jobdir = os.path.join(workdir, "step%02d_part%02d" % (repeat, job))
+      jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
       os.mkdir(jobdir)
       job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, keep, verbose, cpu_assignment[job], gpu_assignment[job], *args)
 
@@ -346,7 +352,7 @@ def multiCmsRun(
 
     # if all jobs were successful, delete the temporary directories
     for job in range(jobs):
-      jobdir = os.path.join(workdir, "step%02d_part%02d" % (repeat, job))
+      jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
       shutil.rmtree(jobdir)
 
     reference_events = np.array(sorted(consistent_events, key = consistent_events.get, reverse = True)[0])
@@ -429,7 +435,7 @@ def multiCmsRun(
     sys.stdout.flush()
 
   # delete the temporary work dir
-  shutil.rmtree(workdir)
+  workdir.cleanup()
 
 
 def info():

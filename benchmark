@@ -32,6 +32,7 @@ if __name__ == "__main__":
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
     'logdir'              : 'logs',                     # relative or absolute path, or None to disable storing the logs
+    'tmpdir'              : None,                       # temporary directory, or None to use a system dependent default temporary directory
     'keep'                : [ 'resources.json' ],       # additional output files to be kept, along with the logs
   }
 
