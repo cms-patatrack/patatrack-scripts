@@ -1,5 +1,7 @@
 #! /usr/bin/env python3
-
+"""benchmark: run N jobs with T threads and S streams over N GPUs
+"""
+import argparse
 import sys
 import os
 import copy
@@ -7,36 +9,109 @@ import copy
 from multirun import *
 import FWCore.ParameterSet.Config as cms
 
-
 if __name__ == "__main__":
+  ### args
+  parser = argparse.ArgumentParser(
+   prog='./'+os.path.basename(__file__),
+   formatter_class=argparse.RawDescriptionHelpFormatter,
+   description=__doc__)
+
+  parser.add_argument('configs', type=str, nargs='+',
+                      help='list of cmsRun configuration files')
+
+  parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', default=False,
+                      help='enable verbose mode [default: False]')
+
+  parser.add_argument('-e', '--events', dest='events', action='store', type=int, default=10300,
+                      help='number of events per cmsRun job [default: 10300]')
+
+  parser.add_argument('-j', '--jobs', dest='jobs', action='store', type=int, default=2,
+                      help='number of cmsRun jobs per throughput estimate [default: 2]')
+
+  parser.add_argument('-r', '--repeats', dest='repeats', action='store', type=int, default=3,
+                      help='repeat each throughput estimate N times [default: 3]')
+
+  parser.add_argument('-t', '--threads', dest='threads', action='store', type=int, default=None,
+                      help='number of threads used in each cmsRun job [default: None -> set automatically]')
+
+  parser.add_argument('-s', '--streams', dest='streams', action='store', type=int, default=None,
+                      help='number of streams used in each cmsRun job [default: None -> set automatically]')
+
+  parser.add_argument('-g', '--gpus-per-job', dest='gpus_per_job', action='store', type=int, default=1,
+                      help='number of GPUs used in each cmsRun job [default: 1]')
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('--warmup', dest='warmup', action='store_true', default=True,
+                     help='do warmup run [default: True]')
+  group.add_argument('--no-warmup', dest='warmup', action='store_false',
+                     help='skip warmup run')
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('-p', '--plumbing', dest='plumbing', action='store_true', default=False,
+                     help='enable plumbing [default: False]')
+  group.add_argument('--no-plumbing', dest='plumbing', action='store_false',
+                     help='disable plumbing')
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('--allow-hyperthreading', dest='allow_hyperthreading', action='store_true', default=True,
+                     help='allow hyperthreading (used only if cpu_affinity=True) [default: True]')
+  group.add_argument('--no-hyperthreading', dest='allow_hyperthreading', action='store_false',
+                     help='do not allow hyperthreading (used only if cpu_affinity=True)')
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('--cpu-affinity', dest='cpu_affinity', action='store_true', default=True,
+                     help='enable CPU affinity [default: True]')
+  group.add_argument('--no-cpu-affinity', dest='cpu_affinity', action='store_false',
+                     help='disable CPU affinity')
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('--gpu-affinity', dest='gpu_affinity', action='store_true', default=True,
+                     help='enable GPU affinity [default: True]')
+  group.add_argument('--no-gpu-affinity', dest='gpu_affinity', action='store_false',
+                     help='disable GPU affinity')
+
+  group = parser.add_mutually_exclusive_group()
+  group.add_argument('-l', '--logdir', dest='logdir', action='store', default='logs',
+                     help='path to output directory for log files (if empty, logs are not stored) [default: "logs"]')
+  group.add_argument('--no-logdir', dest='logdir', action='store_const', const='None',
+                     help='do not store log files (equivalent to "--logdir \'\'")')
+
+  parser.add_argument('--tmpdir', dest='tmpdir', action='store', default=None,
+                      help='path to temporary directory used at runtime [default: None -> system-dependent default temporary directory]')
+
+  parser.add_argument('-k', '--keep', dest='keep', nargs='+', default=['resources.json'],
+                      help='list of additional output files to be kept in logdir, along with the logs [default: ["resources.json"]]')
+
+  opts, opts_unknown = parser.parse_known_args()
+  ### ----
+
+  if len(opts_unknown) > 0:
+    raise RuntimeError('unsupported command-line arguments: '+str(opts_unknown))
+
   if not 'CMSSW_BASE' in os.environ:
-    # FIXME print a meaningful error message
+    print('ERROR: environment variable CMSSW_BASE is not defined (hint: eval `scram runtime -sh`)')
     sys.exit(1)
 
-  if len(sys.argv) == 1:
-    # FIXME print a meaningful error message
-    sys.exit(1)
-
-  # TODO parse arguments and options from the command line
   options = {
-    'verbose'             : False,
-    'plumbing'            : False,
-    'warmup'              : True,
-    'events'              : 10300,
-    'repeats'             : 3,
-    'jobs'                : 2,
-    'threads'             : None,                       # per job
-    'streams'             : None,                       # per job
-    'gpus_per_job'        : 1,                          # per job
-    'allow_hyperthreading': True,                       # this has no effect if set_cpu_affinity is False
-    'set_cpu_affinity'    : True,
-    'set_gpu_affinity'    : True,
-    'logdir'              : 'logs',                     # relative or absolute path, or None to disable storing the logs
-    'tmpdir'              : None,                       # temporary directory, or None to use a system dependent default temporary directory
-    'keep'                : [ 'resources.json' ],       # additional output files to be kept, along with the logs
+    'verbose'             : opts.verbose,
+    'plumbing'            : opts.plumbing,
+    'warmup'              : opts.warmup,
+    'events'              : opts.events,
+    'repeats'             : opts.repeats,
+    'jobs'                : opts.jobs,
+    'threads'             : opts.threads,
+    'streams'             : opts.streams,
+    'gpus_per_job'        : opts.gpus_per_job,
+    'allow_hyperthreading': opts.allow_hyperthreading,
+    'set_cpu_affinity'    : opts.cpu_affinity,
+    'set_gpu_affinity'    : opts.gpu_affinity,
+    'logdir'              : opts.logdir if opts.logdir else None,
+    'tmpdir'              : opts.tmpdir,
+    'keep'                : opts.keep,
   }
 
-  run_io_benchmark = True                               # measure the throughput for reading the input data
+  # measure the throughput for reading the input data
+  run_io_benchmark = True
 
   # print a system overview
   info()
@@ -60,7 +135,7 @@ if __name__ == "__main__":
   if options['streams'] is None:
     options['streams'] = options['threads']
 
-  for config in sys.argv[1:]:
+  for config in opts.configs:
     process = parseProcess(config)
 
     if run_io_benchmark:
