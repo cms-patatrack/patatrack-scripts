@@ -3,6 +3,7 @@
 import sys
 import os
 import copy
+import glob
 import imp
 import itertools
 import math
@@ -62,9 +63,13 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
 
   # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
-    for name in keep + lognames:
-      if os.path.isfile(workdir + '/' + name):
-        shutil.move(workdir + '/' + name, '%s/cmsRun%06d.%s' % (logdir, job.pid, name))
+    # expand any glob patterns in the keep list as-if inside the working directoy
+    names = [ name.removeprefix(workdir + '/') for name in itertools.chain(*(glob.glob(workdir + '/' + pattern) for pattern in keep)) ]
+    for name in names + lognames:
+      source = workdir + '/' + name
+      target = '%s/cmsRun%06d.%s' % (logdir, job.pid, name)
+      os.makedirs(os.path.dirname(target), exist_ok = True)
+      shutil.move(source, target)
     logfiles = tuple('%s/cmsRun%06d.%s' % (logdir, job.pid, name) for name in lognames)
 
   stderr = open(logfiles[1], 'r')
