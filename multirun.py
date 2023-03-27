@@ -303,9 +303,8 @@ def multiCmsRun(
       gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
 
   if warmup:
-    # warm up to cache the binaries, data and conditions
-    jobdir = os.path.join(workdir.name, "warmup")
-    os.mkdir(jobdir)
+    print('Warming up')
+    sys.stdout.flush()
     # recreate logs' directory
     if logdir is not None:
       thislogdir = logdir + '/warmup'
@@ -313,13 +312,24 @@ def multiCmsRun(
       os.makedirs(thislogdir)
     else:
       thislogdir = None
-    print('Warming up')
-    sys.stdout.flush()
-    thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpus = cpu_assignment[0], gpus = gpu_assignment[0], numa_cpu = numa_cpu_nodes[0], numa_mem = numa_mem_nodes[0], *args)
-    thread.start()
-    thread.join()
-    shutil.rmtree(jobdir)
+    # create work threads
+    job_threads = [ None ] * jobs
+    for job in range(jobs):
+      jobdir = os.path.join(workdir.name, "warmup_part%02d" % job)
+      os.mkdir(jobdir)
+      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
+    # start all threads
+    for thread in job_threads:
+      thread.start()
+    # join all threads
+    for thread in job_threads:
+      thread.join()
+    # delete all temporary directories
+    for job in range(jobs):
+      jobdir = os.path.join(workdir.name, "warmup_part%02d" % job)
+      shutil.rmtree(jobdir)
     print()
+    sys.stdout.flush()
 
   if repeats > 1:
     n_times = '%d times' % repeats
