@@ -33,12 +33,44 @@ epoch = datetime.now()
 # skip at least this many events at the beginning of a job when measuring the throughput
 skipevents = 300
 
+def is_iterable(item):
+  try:
+    iter(item)
+    return True
+  except TypeError:
+    return False
+
+
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, cpus = None, gpus = None, *args):
-  # optionally set CPU affinity
+def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, cpus = None, numa_cpu = None, numa_mem = None, gpus = None, *args):
   command = ('cmsRun', filename) + args
+
+  # optionally set CPU affinity
   if cpus is not None:
     command = ('taskset', '-c', cpus) + command
+
+  # optionally set NUMA affinity
+  if numa_cpu is not None or numa_mem is not None:
+    numa_cmd = ('numactl', )
+    numa_cpu_opt = '-N'
+    numa_mem_opt = '-m'
+    # execute cmsRun on the CPUs of the NUMA nodes "numa_cpu";
+    # NUMA nodes may consist of multiple CPUs
+    if numa_cpu is not None:
+      if is_iterable(numa_cpu) and numa_cpu:
+        numa_cmd += (numa_cpu_opt, ','.join(numa_cpu))
+      else:
+        numa_cmd += (numa_cpu_opt, str(numa_cpu))
+    # allocate memory only from the NUMA nodes "numa_mem";
+    # allocations will fail when there is not enough memory available on these nodes
+    if numa_mem is not None:
+      if is_iterable(numa_mem) and numa_mem:
+        numa_cmd += (numa_mem_opt, ','.join(numa_mem))
+      else:
+        numa_cmd += (numa_mem_opt, str(numa_mem))
+    command = numa_cmd + command
+
+  # compose the command line for the verbose option
   cmdline = ' '.join(command)
 
   # optionally set GPU affinity
@@ -171,6 +203,7 @@ def multiCmsRun(
     streams = 1,                    # number of EDM streams per job (default: 1)
     gpus_per_job = 1,               # number of GPUs per job (default: 1)
     allow_hyperthreading = True,    # whether to use extra CPU cores from HyperThreading
+    set_numa_affinity = False,      # FIXME - run each job in a single NUMA node
     set_cpu_affinity = False,       # whether to set CPU affinity
     set_gpu_affinity = False,       # whether yo set GPU affinity
     *args):                         # additional arguments passed to cmsRun
@@ -208,6 +241,15 @@ def multiCmsRun(
   config = open(os.path.join(workdir.name, 'process.py'), 'w')
   config.write(process.dumpPython())
   config.close()
+
+  numa_cpu_nodes = [ None ] * jobs
+  numa_mem_nodes = [ None ] * jobs
+  if set_numa_affinity:
+    # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
+    nodes = sum(len(cpu.nodes) for cpu in cpus.values())
+    numa_cpu_nodes = [ job % nodes for job in range(jobs) ]
+    numa_mem_nodes = [ job % nodes for job in range(jobs) ]             # use only DDR5
+    #numa_mem_nodes = [ job % nodes + nodes for job in range(jobs) ]     # use only HBM
 
   cpu_assignment = [ None ] * jobs
   if set_cpu_affinity:
@@ -273,7 +315,7 @@ def multiCmsRun(
       thislogdir = None
     print('Warming up')
     sys.stdout.flush()
-    thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpu_assignment[0], gpu_assignment[0], *args)
+    thread = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpus = cpu_assignment[0], gpus = gpu_assignment[0], numa_cpu = numa_cpu_nodes[0], numa_mem = numa_mem_nodes[0], *args)
     thread.start()
     thread.join()
     shutil.rmtree(jobdir)
@@ -322,7 +364,7 @@ def multiCmsRun(
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
       os.mkdir(jobdir)
-      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, keep, verbose, cpu_assignment[job], gpu_assignment[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, keep, verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
 
     # start all threads
     for thread in job_threads:
@@ -468,6 +510,7 @@ if __name__ == "__main__":
     'streams'             : 8,          # per job
     'gpus_per_job'        : 2,          # per job
     'allow_hyperthreading': True,
+    'set_numa_affinity'   : False,
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
   }
