@@ -10,20 +10,23 @@ class CPUInfo(object):
   def __init__(self, socket = None, model = None):
     self.socket = socket
     self.model  = model
+    self.nodes  = {}
     self.cores  = {}
     self.hardware_threads    = []
     self.physical_processors = []
 
-  def add_core(self, core, thread):
-    if core in self.cores:
-      self.cores[core].append(thread)
-    else:
-      self.cores[core] = [ thread ]
+  def add_core(self, node, core, thread):
+    if not node in self.nodes:
+      self.nodes[node] = []
+    if not core in self.cores:
+      self.nodes[node].append(core)
+      self.cores[core] = []
+    self.cores[core].append(thread)
 
   def finalise(self):
-    for core in self.cores.values():
-      self.physical_processors.append(core[0])
-      self.hardware_threads.extend(core)
+    for cores in self.cores.values():
+      self.physical_processors.append(min(cores))
+      self.hardware_threads.extend(cores)
     self.physical_processors.sort()
     self.hardware_threads.sort()
 
@@ -54,13 +57,13 @@ def get_cpu_info(cache = True):
 
     sock, numa, core, proc = line.split(',')
     sock = int(sock) if sock else 0
-    numa = int(numa) if numa else sock      # currently unused
+    numa = int(numa) if numa else sock
     core = int(core) if core else 0
     proc = int(proc) if proc else 0
 
     if not sock in cpus:
       cpus[sock] = CPUInfo(sock, model)
-    cpus[sock].add_core(core, proc)
+    cpus[sock].add_core(numa, core, proc)
 
   for cpu in cpus.values():
     cpu.finalise()
@@ -75,6 +78,9 @@ if __name__ == "__main__":
   cpus = get_cpu_info()
   print('%d CPUs:' % len(cpus))
   for cpu in cpus.values():
-    print('  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads)))
-    print('      cores: %s' % ', '.join(map(str, cpu.physical_processors)))
-    print('      HT\'s:  %s' % ', '.join(map(str, cpu.hardware_threads)))
+    print('  %d: %s (%d NUMA nodes, %d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.nodes), len(cpu.physical_processors), len(cpu.hardware_threads)))
+    for node, cores in cpu.nodes.items():
+      print('    NUMA node %d' % node)
+      print('      cores: %s' % ', '.join(map(str, cores)))
+      threads = sorted(thread for core in cores for thread in cpu.cores[core])
+      print('      SMTs:  %s' % ', '.join(map(str, threads)))
