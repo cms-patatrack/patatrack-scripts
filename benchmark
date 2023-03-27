@@ -107,6 +107,17 @@ if __name__ == "__main__":
                      help = 'do not allow HyperThreading/Simultaneous multithreading (used only if cpu_affinity = True)')
 
   group = parser.add_mutually_exclusive_group()
+  group.add_argument('-n', '--numa-affinity',
+                     dest = 'numa_affinity',
+                     action = 'store_true',
+                     default = False,
+                     help = 'enable NUMA affinity [default: False]')
+  group.add_argument('--no-numa-affinity',
+                     dest = 'numa_affinity',
+                     action = 'store_false',
+                     help = 'disable NUMA affinity')
+
+  group = parser.add_mutually_exclusive_group()
   group.add_argument('--cpu-affinity',
                      dest = 'cpu_affinity',
                      action = 'store_true',
@@ -169,6 +180,7 @@ if __name__ == "__main__":
     'streams'             : opts.streams,
     'gpus_per_job'        : opts.gpus_per_job,
     'allow_hyperthreading': opts.allow_hyperthreading,
+    'set_numa_affinity'   : opts.numa_affinity,
     'set_cpu_affinity'    : opts.cpu_affinity,
     'set_gpu_affinity'    : opts.gpu_affinity,
     'logdir'              : opts.logdir if opts.logdir else None,
