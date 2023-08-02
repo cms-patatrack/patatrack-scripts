@@ -48,8 +48,8 @@ def is_iterable(item):
 
 
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, cpus = None, numa_cpu = None, numa_mem = None, gpus = None, *args):
-  command = ('cmsRun', filename) + args
+def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, cpus = None, numa_cpu = None, numa_mem = None, gpus = None, *args):
+  command = (executable, filename) + args
 
   # optionally set CPU affinity
   if cpus is not None:
@@ -60,7 +60,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     numa_cmd = ('numactl', )
     numa_cpu_opt = '-N'
     numa_mem_opt = '-m'
-    # execute cmsRun on the CPUs of the NUMA nodes "numa_cpu";
+    # run on the CPUs of the NUMA nodes "numa_cpu";
     # NUMA nodes may consist of multiple CPUs
     if numa_cpu is not None:
       if is_iterable(numa_cpu) and numa_cpu:
@@ -89,7 +89,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     print(cmdline)
     sys.stdout.flush()
 
-  # run a cmsRun job, redirecting standard output and error to files
+  # run a job, redirecting standard output and error to files
   lognames = ['stdout', 'stderr']
   logfiles = tuple('%s/%s' % (workdir, name) for name in lognames)
   stdout = open(logfiles[0], 'w')
@@ -105,15 +105,15 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     names = [ name.removeprefix(workdir + '/') for name in itertools.chain(*(glob.glob(workdir + '/' + pattern) for pattern in keep)) ]
     for name in names + lognames:
       source = workdir + '/' + name
-      target = '%s/cmsRun%06d/%s' % (logdir, job.pid, name)
+      target = '%s/pid%06d/%s' % (logdir, job.pid, name)
       os.makedirs(os.path.dirname(target), exist_ok = True)
       shutil.move(source, target)
-    logfiles = tuple('%s/cmsRun%06d/%s' % (logdir, job.pid, name) for name in lognames)
+    logfiles = tuple('%s/pid%06d/%s' % (logdir, job.pid, name) for name in lognames)
 
   stderr = open(logfiles[1], 'r')
 
   if (job.returncode < 0):
-    print("The underlying cmsRun job was killed by signal %d" % -job.returncode)
+    print("The underlying %s job was killed by signal %d" % (executable, -job.returncode))
     print()
     print("The last lines of the error log are:")
     print("".join(stderr.readlines()[-10:]))
@@ -124,7 +124,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     return None
 
   elif (job.returncode > 0):
-    print("The underlying cmsRun job failed with return code %d" % job.returncode)
+    print("The underlying %s job failed with return code %d" % (executable, job.returncode))
     print()
     print("The last lines of the error log are:")
     print("".join(stderr.readlines()[-10:]))
@@ -135,7 +135,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     return None
 
   if verbose:
-    print("The underlying cmsRun job completed successfully")
+    print("The underlying %s job completed successfully" % executable)
     sys.stdout.flush()
 
   # analyse the output
@@ -212,7 +212,8 @@ def multiCmsRun(
     set_numa_affinity = False,      # FIXME - run each job in a single NUMA node
     set_cpu_affinity = False,       # whether to set CPU affinity
     set_gpu_affinity = False,       # whether yo set GPU affinity
-    *args):                         # additional arguments passed to cmsRun
+    executable = 'cmsRun',          # executable to run, usually cmsRun
+    *args):                         # additional arguments passed to the executable
 
   # set the number of streams and threads
   process.options.numberOfThreads = cms.untracked.uint32( threads )
@@ -249,21 +250,24 @@ def multiCmsRun(
       tmpdir = os.path.realpath(tmpdir)
 
   # make a full dump of the configuration, to make changes to the number of threads, streams, etc.
-  workdir = tempfile.TemporaryDirectory(prefix = 'cmsRun', dir = tmpdir)
+  workdir = tempfile.TemporaryDirectory(prefix = 'multirun', dir = tmpdir)
   config = open(os.path.join(workdir.name, 'process.py'), 'w')
   config.write(process.dumpPython())
   config.close()
 
   numa_cpu_nodes = [ None ] * jobs
   numa_mem_nodes = [ None ] * jobs
+  """
   if set_numa_affinity:
     # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
     nodes = sum(len(cpu.nodes) for cpu in cpus.values())
     numa_cpu_nodes = [ job % nodes for job in range(jobs) ]
     numa_mem_nodes = [ job % nodes for job in range(jobs) ]             # use only DDR5
     #numa_mem_nodes = [ job % nodes + nodes for job in range(jobs) ]     # use only HBM
+  """
 
   cpu_assignment = [ None ] * jobs
+  """
   if set_cpu_affinity:
     # build the list of CPUs for each job:
     #   - build a list of all "processors", grouped by sockets, cores and hardware threads, e.g.
@@ -300,8 +304,10 @@ def multiCmsRun(
         index = [ i * len(cpu_list) // jobs for i in range(jobs+1) ]
 
       cpu_assignment = [ ','.join(cpu_list[index[i]:index[i+1]]) for i in range(jobs) ]
+  """
 
   gpu_assignment = [ None ] * jobs
+  """
   if set_gpu_affinity:
     # build the list of GPUs for each job:
     #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
@@ -313,6 +319,12 @@ def multiCmsRun(
     else:
       gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
       gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
+  """
+
+  # use both CPUs and both GPUs
+  numa_cpu_nodes = list(range(jobs // 2)) + list(range(4, 4 + (jobs - jobs // 2)))
+  numa_mem_nodes = list(range(jobs // 2)) + list(range(4, 4 + (jobs - jobs // 2)))
+  gpu_assignment = [ 'GPU-ba754dee-147f-b0e0-d00c-58b82ea964da' ] * (jobs // 2) + [ 'GPU-3b2bad55-4b37-d9f3-28c4-9e0d546ead4e' ] * (jobs - jobs // 2)
 
   if warmup:
     print('Warming up')
@@ -334,7 +346,7 @@ def multiCmsRun(
           os.makedirs(daqdir, exists_ok = True)
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
-      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = [], verbose = verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
     # start all threads
     for thread in job_threads:
       thread.start()
@@ -399,7 +411,7 @@ def multiCmsRun(
           os.makedirs(daqdir, exists_ok = True)
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
-      job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, keep, verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = keep, verbose = verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
 
     # start all threads
     for thread in job_threads:

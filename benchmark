@@ -31,6 +31,13 @@ if __name__ == "__main__":
                       default = False,
                       help = 'enable verbose mode [default: False]')
 
+  parser.add_argument('-E', '--executable',
+                      dest = 'executable',
+                      action = 'store',
+                      type = str,
+                      default = 'cmsRun',
+                      help = 'specify what executable to run [default: cmsRun]')
+
   parser.add_argument('-e', '--events',
                       dest = 'events',
                       action = 'store',
@@ -183,6 +190,7 @@ if __name__ == "__main__":
     'set_numa_affinity'   : opts.numa_affinity,
     'set_cpu_affinity'    : opts.cpu_affinity,
     'set_gpu_affinity'    : opts.gpu_affinity,
+    'executable'          : opts.executable,
     'logdir'              : opts.logdir if opts.logdir else None,
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
