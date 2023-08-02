@@ -238,6 +238,11 @@ def multiCmsRun(
     reportEvery = cms.untracked.int32(1)
   )
 
+  # per-job DAQ output directory
+  daqdir = None
+  if 'EvFDaqDirector' in process.__dict__:
+    daqdir = '%s/run%d' % (process.EvFDaqDirector.baseDir.value(), process.EvFDaqDirector.runNumber.value())
+
   # make sure the explicit temporary directory exists
   if tmpdir is not None:
       os.makedirs(tmpdir, exist_ok = True)
@@ -319,11 +324,16 @@ def multiCmsRun(
       os.makedirs(thislogdir)
     else:
       thislogdir = None
-    # create work threads
+    # create work directories and work threads
     job_threads = [ None ] * jobs
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "warmup_part%02d" % job)
       os.mkdir(jobdir)
+      if daqdir is not None:
+        if daqdir.startswith('/'):
+          os.makedirs(daqdir, exists_ok = True)
+        else:
+          os.makedirs(os.path.join(jobdir, daqdir))
       job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, [], verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
     # start all threads
     for thread in job_threads:
@@ -380,10 +390,15 @@ def multiCmsRun(
       os.makedirs(thislogdir)
     else:
       thislogdir = None
-    # create work threads
+    # create work directories and work threads
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
       os.mkdir(jobdir)
+      if daqdir is not None:
+        if daqdir.startswith('/'):
+          os.makedirs(daqdir, exists_ok = True)
+        else:
+          os.makedirs(os.path.join(jobdir, daqdir))
       job_threads[job] = singleCmsRun(config.name, jobdir, thislogdir, keep, verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
 
     # start all threads
