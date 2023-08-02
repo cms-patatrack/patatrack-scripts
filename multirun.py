@@ -12,8 +12,13 @@ import subprocess
 import tempfile
 from collections import defaultdict
 from datetime import datetime
+
+# silence NumPy warnings about denormals
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 import numpy as np
 from scipy import stats
+warnings.filterwarnings("default", category=UserWarning)
 
 # check that CMSSW_BASE is set
 if not 'CMSSW_BASE' in os.environ:
