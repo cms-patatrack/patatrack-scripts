@@ -10,6 +10,7 @@ import math
 import shutil
 import subprocess
 import tempfile
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -76,7 +77,7 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], verbose = False, c
     command = numa_cmd + command
 
   # compose the command line for the verbose option
-  cmdline = ' '.join(command)
+  cmdline = ' '.join(command) + ' &'
 
   # optionally set GPU affinity
   environment = os.environ.copy()
@@ -212,6 +213,7 @@ def multiCmsRun(
     set_cpu_affinity = False,       # whether to set CPU affinity
     set_gpu_affinity = False,       # whether yo set GPU affinity
     *args):                         # additional arguments passed to cmsRun
+
   # set the number of streams and threads
   process.options.numberOfThreads = cms.untracked.uint32( threads )
   process.options.numberOfStreams = cms.untracked.uint32( streams )
@@ -327,6 +329,9 @@ def multiCmsRun(
     for thread in job_threads:
       thread.start()
     # join all threads
+    if verbose:
+      print("wait")
+      sys.stdout.flush()
     for thread in job_threads:
       thread.join()
     # delete all temporary directories
@@ -386,6 +391,10 @@ def multiCmsRun(
       thread.start()
 
     # join all threads
+    if verbose:
+      time.sleep(0.5)
+      print("wait")
+      sys.stdout.flush()
     failed_jobs = [ False ] * jobs
     consistent_events = defaultdict(int)
     for job, thread in enumerate(job_threads):
