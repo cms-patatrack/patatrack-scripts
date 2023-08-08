@@ -257,17 +257,14 @@ def multiCmsRun(
 
   numa_cpu_nodes = [ None ] * jobs
   numa_mem_nodes = [ None ] * jobs
-  """
   if set_numa_affinity:
     # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
     nodes = sum(len(cpu.nodes) for cpu in cpus.values())
     numa_cpu_nodes = [ job % nodes for job in range(jobs) ]
     numa_mem_nodes = [ job % nodes for job in range(jobs) ]             # use only DDR5
     #numa_mem_nodes = [ job % nodes + nodes for job in range(jobs) ]     # use only HBM
-  """
 
   cpu_assignment = [ None ] * jobs
-  """
   if set_cpu_affinity:
     # build the list of CPUs for each job:
     #   - build a list of all "processors", grouped by sockets, cores and hardware threads, e.g.
@@ -304,10 +301,8 @@ def multiCmsRun(
         index = [ i * len(cpu_list) // jobs for i in range(jobs+1) ]
 
       cpu_assignment = [ ','.join(cpu_list[index[i]:index[i+1]]) for i in range(jobs) ]
-  """
 
   gpu_assignment = [ None ] * jobs
-  """
   if set_gpu_affinity:
     # build the list of GPUs for each job:
     #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
@@ -319,12 +314,6 @@ def multiCmsRun(
     else:
       gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
       gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
-  """
-
-  # use both CPUs and both GPUs
-  numa_cpu_nodes = list(range(jobs // 2)) + list(range(4, 4 + (jobs - jobs // 2)))
-  numa_mem_nodes = list(range(jobs // 2)) + list(range(4, 4 + (jobs - jobs // 2)))
-  gpu_assignment = [ 'GPU-ba754dee-147f-b0e0-d00c-58b82ea964da' ] * (jobs // 2) + [ 'GPU-3b2bad55-4b37-d9f3-28c4-9e0d546ead4e' ] * (jobs - jobs // 2)
 
   if warmup:
     print('Warming up')
