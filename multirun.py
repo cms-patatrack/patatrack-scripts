@@ -7,6 +7,7 @@ import glob
 import imp
 import itertools
 import math
+import psutil
 import shutil
 import subprocess
 import tempfile
@@ -94,10 +95,29 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   logfiles = tuple('%s/%s' % (workdir, name) for name in lognames)
   stdout = open(logfiles[0], 'w')
   stderr = open(logfiles[1], 'w')
+  start = datetime.now()
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
+
+  proc = psutil.Process(job.pid)
+  raw_data = []
+  while True:
+    try:
+      with proc.oneshot():
+        timet = datetime.now()
+        mem = proc.memory_full_info()
+        raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
+    except psutil.NoSuchProcess:
+      break
+    try:
+      job.wait(timeout = 1)
+      break
+    except subprocess.TimeoutExpired:
+      pass
   job.communicate()
   stdout.close()
   stderr.close()
+  types = np.dtype([('time', 'float'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
+  monitoring_data = np.array(raw_data, types)
 
   # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
@@ -162,12 +182,12 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
 
     # read the matching lines
     event = int(matches.group(1))
-    time  = datetime.strptime(matches.group(2), date_format)
+    timet = datetime.strptime(matches.group(2), date_format)
     events.append(event)
-    times.append((time - epoch).total_seconds())
+    times.append((timet - epoch).total_seconds())
 
   stderr.close()
-  return (tuple(events), tuple(times))
+  return (tuple(events), tuple(times), monitoring_data)
 
 
 def parseProcess(filename):
@@ -336,15 +356,18 @@ def multiCmsRun(
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
       job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = [], verbose = verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
+
     # start all threads
     for thread in job_threads:
       thread.start()
+
     # join all threads
     if verbose:
       print("wait")
       sys.stdout.flush()
     for thread in job_threads:
       thread.join()
+
     # delete all temporary directories
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "warmup_part%02d" % job)
@@ -383,6 +406,7 @@ def multiCmsRun(
     events      = [ None ] * jobs
     times       = [ None ] * jobs
     fits        = [ None ] * jobs
+    monit       = [ None ] * jobs
     job_threads = [ None ] * jobs
     # recreate logs' directory
     if logdir is not None:
@@ -416,10 +440,13 @@ def multiCmsRun(
     for job, thread in enumerate(job_threads):
       # implicitly wait for the thread to complete
       result = thread.result.get()
-      if result is None or not(all(result)):
+      if result is None:
         failed_jobs[job] = True
         continue
-      (e, t) = result
+      (e, t, m) = result
+      if not e or not t:
+        failed_jobs[job] = True
+        continue
       # skip the entries before skipevents
       ne = tuple(e[i] for i in range(len(e)) if e[i] >= skipevents)
       nt = tuple(t[i] for i in range(len(e)) if e[i] >= skipevents)
@@ -429,6 +456,7 @@ def multiCmsRun(
       events[job] = np.array(e)
       times[job]  = np.array(t)
       fits[job]   = stats.linregress(times[job], events[job])
+      monit[job]  = m
 
     # if any jobs failed, skip the whole measurement
     if any(failed_jobs):
@@ -487,6 +515,14 @@ def multiCmsRun(
     if data:
       data.write('%d, %f, %d, %d, %d, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, used_events, throughput, error))
 
+    # do something with the monitoring data
+    if thislogdir is not None:
+      monit_file = open(thislogdir + '/monit.py', 'w')
+      monit_file.write("import numpy as np\n\n")
+      monit_file.write("monit = ")
+      monit_file.write(repr(monit).replace('array', '\n  np.array'))
+      monit_file.write("\n")
+      monit_file.close()
 
   # compute the average throughput over the repetitions
   if repeats > 1 and not plumbing:
