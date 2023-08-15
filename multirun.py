@@ -162,7 +162,7 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   date_format  = '%d-%b-%Y %H:%M:%S.%f'
   # expected format
   #     100, 18-Mar-2020 12:16:39.172836 CET
-  begin_pattern = re.compile(r'%MSG-i ThroughputService:  *AfterModEndJob')
+  begin_pattern = re.compile(r'%MSG-. ThroughputService:  *AfterModEndJob')
   line_pattern  = re.compile(r' *(\d+), (\d+-...-\d\d\d\d \d\d:\d\d:\d\d.\d\d\d\d\d\d) .*')
 
   events = []
