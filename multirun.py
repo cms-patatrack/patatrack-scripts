@@ -109,7 +109,8 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
     except psutil.NoSuchProcess:
       break
     try:
-      job.wait(timeout = 1)
+      job.communicate()
+      time.sleep(1)
       break
     except subprocess.TimeoutExpired:
       pass
