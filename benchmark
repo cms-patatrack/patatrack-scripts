@@ -81,6 +81,17 @@ if __name__ == "__main__":
                       help = 'number of GPUs used in each cmsRun job [default: 1]')
 
   group = parser.add_mutually_exclusive_group()
+  parser.add_argument('--run-io-benchmark',
+                      dest = 'run_io_benchmark',
+                      action= 'store_true',
+                      default = True,
+                      help = 'measure the I/O benchmarks before the other measurements [default: True]')
+  parser.add_argument('--no-run-io-benchmark',
+                      dest = 'run_io_benchmark',
+                      action= 'store_false',
+                      help = 'skip the I/O measurement')
+
+  group = parser.add_mutually_exclusive_group()
   group.add_argument('--warmup',
                      dest = 'warmup',
                      action = 'store_true',
@@ -197,7 +208,7 @@ if __name__ == "__main__":
   }
 
   # measure the throughput for reading the input data
-  run_io_benchmark = True
+  run_io_benchmark = opts.run_io_benchmark
 
   # print a system overview
   info()
