@@ -39,8 +39,13 @@ parser.add_argument('-x', '--x-axis',
   default = 'EDM streams',
   help = 'plot vs the number of CPU threads or EDM streams, overall or per job')
 
-args = parser.parse_args()
+parser.add_argument('-l', '--labels',
+                      dest = 'labels',
+                      nargs = '+',
+                      default = None,
+                      help = 'list of labels to display in the legend. The default is None, which means extract the legend names from the filenames.')
 
+args = parser.parse_args()
 
 import numpy as np
 import pandas as pd
@@ -103,13 +108,19 @@ sns.set_palette([
 
 data = []
 
-for file in args.files:
+for label_idx,file in enumerate(args.files):
   # expected file format:
   #   jobs, overlap, CPU threads per job, EDM streams per job, GPUs per jobs, number of events, average throughput (ev/s), uncertainty (ev/s)
   #   2, 0.994863, 6, 6, 1, 4000, 3591.314398, 1.665309
   #   ...
   values = pd.read_csv(file).rename(columns=lambda x: x.strip())
 
+  if args.labels:
+    if len(args.labels) != len(args.files):
+      print("Labels mismatch with input filenames {}".format(args.labels))
+      sys.exit(1)
+    values.insert(0, 'name', args.labels[label_idx], True)
+    data.append(values)
   # if the data does not have a name, build it from the file name
   if not 'name' in values:
     name = os.path.basename(file.name)
@@ -131,6 +142,10 @@ if args.normalise:
 df['CPU threads'] =  df['CPU threads per job'] * df['jobs']
 df['EDM streams'] =  df['EDM streams per job'] * df['jobs']
 
+sides = 1
+markers = [(sides * ((n//3)%3 + 4), (n % 3), 0) for n,_ in enumerate(df['name'].unique())]
+print(markers)
+
 plot = sns.lmplot(
   data = df,
   x = args.x_axis,
@@ -143,6 +158,8 @@ plot = sns.lmplot(
   legend = True,
   legend_out = True,                # show the legend to the right of the plot
   truncate = False,
+  markers = markers,
+  scatter_kws={"s": 80},
   ci = 95.,
   )
 
