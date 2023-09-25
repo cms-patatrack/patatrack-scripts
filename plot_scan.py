@@ -142,6 +142,10 @@ if args.normalise:
 df['CPU threads'] =  df['CPU threads per job'] * df['jobs']
 df['EDM streams'] =  df['EDM streams per job'] * df['jobs']
 
+sides = 1
+markers = [(sides * ((n//3)%3 + 4), (n % 3), 0) for n,_ in enumerate(df['name'].unique())]
+print(markers)
+
 plot = sns.lmplot(
   data = df,
   x = args.x_axis,
@@ -154,6 +158,8 @@ plot = sns.lmplot(
   legend = True,
   legend_out = True,                # show the legend to the right of the plot
   truncate = False,
+  markers = markers,
+  scatter_kws={"s": 80},
   ci = 95.,
   )
 
