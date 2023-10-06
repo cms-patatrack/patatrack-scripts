@@ -336,6 +336,11 @@ def multiCmsRun(
       gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
       gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
 
+  # distribute jobs across all NUMA nodes
+  numa_cpu_nodes = list(itertools.islice(itertools.cycle([0, 1]), jobs))
+  numa_mem_nodes = list(numa_cpu_nodes)
+  cpu_assignment = [ None ] * jobs
+
   if warmup:
     print('Warming up')
     sys.stdout.flush()
