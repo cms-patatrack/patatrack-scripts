@@ -15,34 +15,10 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-# Ghazi's additions (functions)
+import pynvml as nvml
 
-from devicedata import measure_current_GPU_memory_per_handle, measure_current_GPU_usage_per_handle, time_interval
-from threading import Thread
-from plot import line_graph
+#from plot import line_graph
 
-idx = 1
-
-# def get_avg(arr):
-#     n = len(arr)
-#     res = sum(arr)
-#     return round(res / n, 3) if n > 0 else 0
-
-def run_function(BGP, function, data_list, time_list, HORP):
-
-    while BGP.poll() is None:
-        try:
-            function(HORP, data_list)
-            if len(time_list) == 0:
-                time_list.append(time_interval)
-            else:
-                time_list.append(time_list[-1] + time_interval)
-        except:
-            break
-
-        time.sleep(time_interval)
-
-# End of ghazi's additions 
 
 # silence NumPy warnings about denormals
 import warnings
@@ -119,18 +95,13 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
     print(cmdline)
     sys.stdout.flush()
 
-  # Ghazi's addition
     
-  GPU_memory_usage_data_list, GPU_usage_data_list = [], []
-  GPU_memory_time, GPU_usage_time = [],[]
 
-  import pynvml as nvml
   nvml.nvmlInit()
   device_index = 0 # this should be set based on the parameter "gpus", but momentarily, it will be 0
   handle = nvml.nvmlDeviceGetHandleByIndex(device_index)
 
 
-  # End of Ghazi's addition
 
   # run a job, redirecting standard output and error to files
   lognames = ['stdout', 'stderr']
@@ -140,17 +111,17 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   start = datetime.now()
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
 
-  # Ghazi's addition
-  t1 = Thread(target=run_function, args=(job, measure_current_GPU_usage_per_handle, GPU_usage_data_list, GPU_usage_time, handle))
-  t2 = Thread(target=run_function, args=(job, measure_current_GPU_memory_per_handle, GPU_memory_usage_data_list, GPU_memory_time, handle))
-  t1.start()
-  t2.start()
-  # End of Ghazi's addition
 
   proc = psutil.Process(job.pid)
-  raw_data = []
+  raw_data = [] 
+  GPU_memory, GPU_util = [], []
   while True:
     try:
+        memory = nvml.nvmlDeviceGetMemoryInfo(handle)
+	    GPU_memory.append((memory.total - memory.free) / 1024**2)
+        utilization = nvml.nvmlDeviceGetUtilizationRates(handle)
+    	GPU_util.append(utilization.gpu / 100)
+
       with proc.oneshot():
         timet = datetime.now()
         mem = proc.memory_full_info()
@@ -158,28 +129,23 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
     except psutil.NoSuchProcess:
       break
     try:
-      job.communicate()
+      #job.communicate()
       time.sleep(1)
-      break
+      #break
     except subprocess.TimeoutExpired:
       pass
   job.communicate()
-
-# Ghazi's addition
-  t1.join()
-  t2.join()
-  # global idx
-  # line_graph(GPU_usage_time, GPU_usage_data_list, f"throughput_GPU-Usage_trial-{idx}", save_fig=True, show_fig=False)
-  # line_graph(GPU_memory_time, GPU_memory_usage_data_list, f"throughput_GPU-Memory_trial-{idx}", save_fig=True, show_fig=False)
-  # idx += 1
-# Ghazi's addition
-
-
 
   stdout.close()
   stderr.close()
   types = np.dtype([('time', 'float'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
   monitoring_data = np.array(raw_data, types)
+
+  GPU_util_average = sum(GPU_util)/len(GPU_util)
+  GPU_memory_average = sum(GPU_memory)/len(GPU_memory)
+  print(f"GPU average memory usage = {GPU_memory_average}")
+  print(f"GPU average utilization = {GPU_util_average}") 
+
 
   # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
