@@ -142,8 +142,9 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
 
   GPU_util_average = sum(GPU_util)/len(GPU_util)
   GPU_memory_average = sum(GPU_memory)/len(GPU_memory)
-  print(f"GPU average memory usage = {GPU_memory_average}")
-  print(f"GPU average utilization = {GPU_util_average}") 
+  memory = nvml.nvmlDeviceGetMemoryInfo(handle)
+  print(f"   GPU average memory usage = {GPU_memory_average} (total {memory.free})")
+  print(f"   GPU processing average tilization = {GPU_util_average}%") 
 
 
   # if requested, move the logs and any additional artifacts to the log directory
