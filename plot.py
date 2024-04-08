@@ -4,7 +4,7 @@ def bar_graph(X_axis, Y_axis, fig_name=None, save_fig=False, show_fig=True):
 
     if len(X_axis) == 0 or len(Y_axis) == 0:
 
-        print("\nOne of the lists that you have provided are empty.")
+        print("\nOne of the lists that you have provided is empty.")
         return
     
     plt.bar(X_axis, Y_axis)
@@ -21,7 +21,7 @@ def line_graph(X_axis, Y_axis, fig_name=None, save_fig=False, show_fig=True):
 
     if len(X_axis) == 0 or len(Y_axis) == 0:
 
-        print("\nOne of the lists that you have provided are empty.")
+        print("\nOne of the lists that you have provided is empty.")
         return
     
     plt.plot(X_axis, Y_axis)
