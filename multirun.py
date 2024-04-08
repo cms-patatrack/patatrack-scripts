@@ -31,7 +31,7 @@ warnings.filterwarnings("default", category=UserWarning)
 if not 'CMSSW_BASE' in os.environ:
     raise RuntimeError('Please load the CMSSW environment with "cmsenv"')
 
-import FWCore.ParameterSet.python.Config as cms
+import FWCore.ParameterSet.Config as cms
 
 from cpuinfo import *
 from gpuinfo import *
@@ -118,14 +118,13 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   while True:
     try:
         memory = nvml.nvmlDeviceGetMemoryInfo(handle)
-	    GPU_memory.append((memory.total - memory.free) / 1024**2)
+        GPU_memory.append((memory.total - memory.free) / 1024**2)
         utilization = nvml.nvmlDeviceGetUtilizationRates(handle)
-    	GPU_util.append(utilization.gpu / 100)
-
-      with proc.oneshot():
-        timet = datetime.now()
-        mem = proc.memory_full_info()
-        raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
+        GPU_util.append(utilization.gpu / 100)
+        with proc.oneshot():
+            timet = datetime.now()
+            mem = proc.memory_full_info()
+            raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
     except psutil.NoSuchProcess:
       break
     try:
@@ -231,7 +230,6 @@ def parseProcess(filename):
   sys.path.append(os.getcwd())
   try:
     pycfg = imp.load_source('pycfg', filename, handle)
-    print(dir(pycfg))
     process = pycfg.process
   except:
     print("Failed to parse %s: %s" % (filename, sys.exc_info()[1]))
