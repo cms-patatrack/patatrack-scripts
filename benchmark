@@ -166,7 +166,7 @@ if __name__ == "__main__":
   group.add_argument('--no-logdir',
                      dest = 'logdir',
                      action = 'store_const',
-                     const = 'None',
+                     const = '',
                      help = 'do not store log files (equivalent to "--logdir \'\'")')
 
   parser.add_argument('-k', '--keep',
