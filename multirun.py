@@ -15,6 +15,11 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
+import pynvml as nvml
+
+#from plot import line_graph
+
+
 # silence NumPy warnings about denormals
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -90,6 +95,14 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
     print(cmdline)
     sys.stdout.flush()
 
+    
+
+  nvml.nvmlInit()
+  device_index = 0 # this should be set based on the parameter "gpus", but momentarily, it will be 0
+  handle = nvml.nvmlDeviceGetHandleByIndex(device_index)
+
+
+
   # run a job, redirecting standard output and error to files
   lognames = ['stdout', 'stderr']
   logfiles = tuple('%s/%s' % (workdir, name) for name in lognames)
@@ -98,27 +111,41 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   start = datetime.now()
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
 
+
   proc = psutil.Process(job.pid)
-  raw_data = []
+  raw_data = [] 
+  GPU_memory, GPU_util = [], []
   while True:
     try:
-      with proc.oneshot():
-        timet = datetime.now()
-        mem = proc.memory_full_info()
-        raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
+        memory = nvml.nvmlDeviceGetMemoryInfo(handle)
+        GPU_memory.append((memory.total - memory.free) / 1024**2)
+        utilization = nvml.nvmlDeviceGetUtilizationRates(handle)
+        GPU_util.append(utilization.gpu / 100)
+        with proc.oneshot():
+            timet = datetime.now()
+            mem = proc.memory_full_info()
+            raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
     except psutil.NoSuchProcess:
       break
     try:
-      job.communicate()
+      #job.communicate()
       time.sleep(1)
-      break
+      #break
     except subprocess.TimeoutExpired:
       pass
   job.communicate()
+
   stdout.close()
   stderr.close()
   types = np.dtype([('time', 'float'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
   monitoring_data = np.array(raw_data, types)
+
+  GPU_util_average = sum(GPU_util)/len(GPU_util)
+  GPU_memory_average = sum(GPU_memory)/len(GPU_memory)
+  memory = nvml.nvmlDeviceGetMemoryInfo(handle)
+  print(f"   GPU average memory usage = {GPU_memory_average} (total {memory.free})")
+  print(f"   GPU processing average tilization = {GPU_util_average}%") 
+
 
   # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
