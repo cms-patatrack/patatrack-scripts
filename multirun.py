@@ -105,7 +105,9 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
       with proc.oneshot():
         timet = datetime.now()
         mem = proc.memory_full_info()
-        raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
+        start_str = start.strftime("%m/%d/%y %H:%M:%S.%f")[:-3]
+        timet_str = timet.strftime("%m/%d/%y %H:%M:%S.%f")[:-3]
+        raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss, start_str, timet_str))  # time, vsz, rss, pss, time_start, time_end
     except psutil.NoSuchProcess:
       break
     try:
@@ -117,7 +119,7 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   job.communicate()
   stdout.close()
   stderr.close()
-  types = np.dtype([('time', 'float'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
+  types = np.dtype([('time', 'float'), ('vsz', 'int'), ('rss', 'int'), ('pss','int'), ("time_start", "U19"), ("time_end" ,"U19")])
   monitoring_data = np.array(raw_data, types)
 
   # if requested, move the logs and any additional artifacts to the log directory
@@ -168,7 +170,10 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
 
   events = []
   times  = []
+  start_times = []
+  end_times = []
   matching = False
+  current_start = epoch.strftime("%m/%d/%y %H:%M:%S.%f")[:-3]
   for line in stderr:
     # look for the begin marker
     if not matching:
@@ -186,9 +191,12 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
     timet = datetime.strptime(matches.group(2), date_format)
     events.append(event)
     times.append((timet - epoch).total_seconds())
-
+    time_end = timet.strftime("%m/%d/%y %H:%M:%S.%f")[:-3]
+    start_times.append(current_start)
+    end_times.append(time_end)
+    current_start = time_end
   stderr.close()
-  return (tuple(events), tuple(times), monitoring_data)
+  return (tuple(events), tuple(times), tuple(start_times), tuple(end_times), monitoring_data)
 
 
 def parseProcess(filename):
@@ -230,6 +238,7 @@ def multiCmsRun(
     streams = 1,                    # number of EDM streams per job (default: 1)
     gpus_per_job = 1,               # number of GPUs per job (default: 1)
     allow_hyperthreading = True,    # whether to use extra CPU cores from HyperThreading
+    overlap_only = False,           # whether to compute throughput based only on time frame where all the jobs are running 
     set_numa_affinity = False,      # FIXME - run each job in a single NUMA node
     set_cpu_affinity = False,       # whether to set CPU affinity
     set_gpu_affinity = False,       # whether yo set GPU affinity
@@ -406,6 +415,8 @@ def multiCmsRun(
     # run the jobs reading the output to extract the event throughput
     events      = [ None ] * jobs
     times       = [ None ] * jobs
+    start_times = [ None ] * jobs
+    end_times   = [ None ] * jobs
     fits        = [ None ] * jobs
     monit       = [ None ] * jobs
     job_threads = [ None ] * jobs
@@ -428,9 +439,9 @@ def multiCmsRun(
       job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = keep, verbose = verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
 
     # start all threads
+    start_time = datetime.now()
     for thread in job_threads:
       thread.start()
-
     # join all threads
     if verbose:
       time.sleep(0.5)
@@ -444,18 +455,24 @@ def multiCmsRun(
       if result is None:
         failed_jobs[job] = True
         continue
-      (e, t, m) = result
+      (e, t, st, et,  m) = result
       if not e or not t:
         failed_jobs[job] = True
         continue
       # skip the entries before skipevents
       ne = tuple(e[i] for i in range(len(e)) if e[i] >= skipevents)
       nt = tuple(t[i] for i in range(len(e)) if e[i] >= skipevents)
+      nst = tuple(st[i] for i in range(len(e)) if e[i] >= skipevents)
+      net = tuple(st[i] for i in range(len(e)) if e[i] >= skipevents)
       e = ne
       t = nt
+      st = nst
+      et = net
       consistent_events[e] += 1
       events[job] = np.array(e)
       times[job]  = np.array(t)
+      start_times[job] = np.array(st)
+      end_times[job] = np.array(et)
       fits[job]   = stats.linregress(times[job], events[job])
       monit[job]  = m
 
@@ -465,7 +482,6 @@ def multiCmsRun(
       sys.stdout.flush()
       failed[repeat] = True
       continue
-
     # if all jobs were successful, delete the temporary directories
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
@@ -487,9 +503,28 @@ def multiCmsRun(
       sys.stdout.flush()
       failed[repeat] = True
       continue
-
-    # measure the average throughput
-    used_events = reference_events[-1] - reference_events[0]
+    filtered_events = events
+    filtered_times = times
+    filtered_start_times = start_times
+    filtered_end_times = end_times
+    # Find the overlapping time range
+    max_start_time, max_start_index = max((t[0], i) for i, t in enumerate(times))
+    min_end_time, min_end_index = min((t[-1], i) for i, t in enumerate(times))
+    if(overlap_only):
+        common_overlap_indices = np.ones(len(times[0]), dtype=bool)
+        for job in range(jobs):
+            overlap_indices = (times[job] >= max_start_time) & (times[job] <= min_end_time)
+            common_overlap_indices &= overlap_indices
+        # After determining the common overlap indices, filter the data
+        for job in range(jobs):
+            filtered_times[job] = times[job][common_overlap_indices]
+            filtered_start_times[job] = start_times[job][common_overlap_indices]
+            filtered_end_times[job] = end_times[job][common_overlap_indices]
+            filtered_events[job] = events[job][common_overlap_indices]
+        fits = [None] * jobs
+        for job in range(jobs):
+            fits[job] = stats.linregress(filtered_times[job], filtered_events[job])
+    used_events = filtered_events[0][-1] - filtered_events[0][0]
     throughput  = sum(fit.slope for fit in fits)
     error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
     if jobs > 1:
@@ -497,13 +532,16 @@ def multiCmsRun(
       overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
       if overlap < 0.:
         overlap = 0.
+      if(overlap_only):
+          overlap = 1.
       # machine- or human-readable formatting
-      formatting = '%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
+      formatting = f'\tStart\t{filtered_start_times[max_start_index][0]}\n\tEnd\t{filtered_end_times[min_end_index][-1]}\n%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else f'\tStart\t{filtered_start_times[0][0]}\n\tEnd\t{filtered_end_times[0][-1]}\n%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
       print(formatting % (throughput, error, used_events, overlap * 100.))
+
     else:
       overlap = 1.
       # machine- or human-readable formatting
-      formatting = '%8.1f\t%8.1f\t%d' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events)'
+      formatting = f'\tStart\t{filtered_start_times[0][0]}\n\tEnd\t{filtered_end_times[0][-1]}\n%8.1f\t%8.1f\t%d' if plumbing else f'\tStart\t{filtered_start_times[0][0]}\n\tEnd\t{filtered_end_times[0][-1]}\n%8.1f \u00b1 %5.1f ev/s (%d events)'
       print(formatting % (throughput, error, used_events))
     sys.stdout.flush()
 

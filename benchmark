@@ -125,6 +125,18 @@ if __name__ == "__main__":
                      help = 'do not allow HyperThreading/Simultaneous multithreading (used only if cpu_affinity = True)')
 
   group = parser.add_mutually_exclusive_group()
+  group.add_argument('--overlap-only',
+                     dest = 'overlap',
+                     action = 'store_true',
+                     default = False,
+                     help = 'Consider only time frame where all the jobs are running [default: False]')
+  group.add_argument('--no-overlap-only',
+                     dest = 'overlap',
+                     action = 'store_true',
+                     default = True,
+                     help = 'Do not consider only time frame where all the jobs are running [default: True]')
+
+  group = parser.add_mutually_exclusive_group()
   group.add_argument('-n', '--numa-affinity',
                      dest = 'numa_affinity',
                      action = 'store_true',
@@ -198,6 +210,7 @@ if __name__ == "__main__":
     'streams'             : opts.streams,
     'gpus_per_job'        : opts.gpus_per_job,
     'allow_hyperthreading': opts.allow_hyperthreading,
+    'overlap_only'        : opts.overlap,
     'set_numa_affinity'   : opts.numa_affinity,
     'set_cpu_affinity'    : opts.cpu_affinity,
     'set_gpu_affinity'    : opts.gpu_affinity,
