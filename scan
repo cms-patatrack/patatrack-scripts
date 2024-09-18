@@ -89,6 +89,8 @@ if __name__ == "__main__":
     'plumbing'            : opts.plumbing,
     'warmup'              : opts.warmup,
     'events'              : opts.events,
+    'resolution'          : opts.event_resolution,
+    'skipevents'          : opts.event_skip,
     'repeats'             : opts.repeats,
     'jobs'                : opts.jobs,
     'threads'             : opts.threads,

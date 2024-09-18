@@ -60,6 +60,20 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             type = int,
             default = 10300,
             help = 'number of events per cmsRun job [default: 10300]')
+        self.parser.add_argument('--event-resolution',
+            dest = 'event_resolution',
+            metavar = 'EVENTS',
+            action = 'store',
+            type = int,
+            default = 100,
+            help = 'sample the number of processed events with the given resolution')
+        self.parser.add_argument('--event-skip',
+            dest = 'event_skip',
+            metavar = 'EVENTS',
+            action = 'store',
+            type = int,
+            default = 300,
+            help = 'skip the firts EVENTS in each job, rounded to the next multiple of the event resulution')
 
         self.parser.add_argument('-j', '--jobs',
             dest = 'jobs',
