@@ -4,210 +4,54 @@ import argparse
 import sys
 import os
 
+from options import OptionParser
 from multirun import *
 
 def parseArguments():
-  parser = argparse.ArgumentParser(
-   prog = './'+os.path.basename(__file__),
-   formatter_class = argparse.RawDescriptionHelpFormatter,
-   description = __doc__)
+  parser = OptionParser()
 
   # Options specific to scan
-  parser.add_argument('--steps',
-                      type = int,
-                      nargs = '+',
-                      default = None,
-                      help = 'list, or None to make a linear scan from min_step to max_step [default: None]')
+  parser.parser.add_argument('--steps',
+    type = int,
+    nargs = '+',
+    default = None,
+    help = 'list, or None to make a linear scan from min_step to max_step [default: None]')
 
-  parser.add_argument('--min-step',
-                      dest = 'min_step',
-                      type = int,
-                      default = 1,
-                      help = 'minimum number of cores to scan [default: 1]')
+  parser.parser.add_argument('--min-step',
+    dest = 'min_step',
+    type = int,
+    default = 1,
+    help = 'minimum number of cores to scan [default: 1]')
 
-  parser.add_argument('--max-step',
-                      dest = 'max_step',
-                      type = int,
-                      default = None,
-                      help = 'maximum number of cores to scan. Use None to guess based on the number of available cores (or threads) and concurrent jobs [default: None]')
+  parser.parser.add_argument('--max-step',
+    dest = 'max_step',
+    type = int,
+    default = None,
+    help = 'maximum number of cores to scan. Use None to guess based on the number of available cores (or threads) and concurrent jobs [default: None]')
 
-  parser.add_argument('--run-io-benchmark',
-                      dest = 'run_io_benchmark',
-                      action= 'store_true',
-                      default = False,
-                      help = 'Run IO benchmarks at the beginning of the scan [default: False]')
+  parser.parser.add_argument('--csv-data',
+    dest = 'csv_data',
+    default = 'scan.csv',
+    help = 'csv file to save the results into [default: scan.csv]')
 
-  parser.add_argument('--csv-data',
-                      dest = 'csv_data',
-                      default = 'scan.csv',
-                      help = 'csv file to save the results into [default: scan.csv]')
+  parser.parser.add_argument('--events-extra-per-thread',
+    dest = 'events_extra_per_thread',
+    default = 0,
+    type = int,
+    help = 'increase by this amount the number of events per thread [default: 0]')
 
-  parser.add_argument('--events-extra-per-thread',
-                      dest = 'events_extra_per_thread',
-                      default = 0,
-                      type = int,
-                      help = 'increase by this amount the number of events per thread [default: 0]')
+  parser.parser.add_argument('--events-limit',
+    dest = 'events_limit',
+    type = int,
+    default = 0,
+    help = 'if not 0, limit the total number of events to be processed [default: 0]')
 
-  parser.add_argument('--events-limit',
-                      dest = 'events_limit',
-                      type = int,
-                      default = 0,
-                      help = 'if not 0, limit the total number of events to be processed [default: 0]')
+  return parser.parse(sys.argv[1:])
 
-  # Options to be passed down to multiCmsRun
-  parser.add_argument('config',
-                      type = str,
-                      help = 'cmsRun configuration file')
-
-  parser.add_argument('-v', '--verbose',
-                      dest = 'verbose',
-                      action = 'store_true',
-                      default = False,
-                      help = 'enable verbose mode [default: False]')
-
-  parser.add_argument('-E', '--executable',
-                      dest = 'executable',
-                      action = 'store',
-                      type = str,
-                      default = 'cmsRun',
-                      help = 'specify what executable to run [default: cmsRun]')
-
-  parser.add_argument('-e', '--events',
-                      dest = 'events',
-                      action = 'store',
-                      type = int,
-                      default = 10300,
-                      help = 'number of events per cmsRun job [default: 10300]')
-
-  parser.add_argument('-j', '--jobs',
-                      dest = 'jobs',
-                      action = 'store',
-                      type = int,
-                      default = 2,
-                      help = 'number of concurrent cmsRun jobs per measurement [default: 2]')
-
-  parser.add_argument('-r', '--repeats',
-                      dest = 'repeats',
-                      action = 'store',
-                      type = int,
-                      default = 3,
-                      help = 'repeat each measurement N times [default: 3]')
-
-  parser.add_argument('-t', '--threads',
-                      dest = 'threads',
-                      action = 'store',
-                      type = int,
-                      default = None,
-                      help = 'number of threads used in each cmsRun job [default: None -> set automatically from the current step]')
-
-  parser.add_argument('-s', '--streams',
-                      dest = 'streams',
-                      action = 'store',
-                      type = int,
-                      default = None,
-                      help = 'number of streams used in each cmsRun job [default: None -> set automatically from the current step]')
-
-
-  parser.add_argument('-g', '--gpus-per-job',
-                      dest = 'gpus_per_job',
-                      action = 'store',
-                      type = int,
-                      default = 1,
-                      help = 'number of GPUs used in each cmsRun job [default: 1]')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--warmup',
-                     dest = 'warmup',
-                     action = 'store_true',
-                     default = True,
-                     help = 'do a warmup run before the measurements [default: True]')
-  group.add_argument('--no-warmup',
-                     dest = 'warmup',
-                     action = 'store_false',
-                     help = 'skip the warmup run')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('-p', '--plumbing',
-                     dest = 'plumbing',
-                     action = 'store_true',
-                     default = False,
-                     help = 'enable plumbing output [default: False]')
-  group.add_argument('--no-plumbing',
-                     dest = 'plumbing',
-                     action = 'store_false',
-                     help = 'disable plumbing output')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--allow-hyperthreading',
-                     dest = 'allow_hyperthreading',
-                     action = 'store_true',
-                     default = True,
-                     help = 'allow HyperThreading/Simultaneous multithreading (used only if cpu_affinity = True) [default: True]')
-  group.add_argument('--no-hyperthreading',
-                     dest = 'allow_hyperthreading',
-                     action = 'store_false',
-                     help = 'do not allow HyperThreading/Simultaneous multithreading (used only if cpu_affinity = True)')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--cpu-affinity',
-                     dest = 'cpu_affinity',
-                     action = 'store_true',
-                     default = True,
-                     help = 'enable CPU affinity [default: True]')
-  group.add_argument('--no-cpu-affinity',
-                     dest = 'cpu_affinity',
-                     action = 'store_false',
-                     help = 'disable CPU affinity')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--gpu-affinity',
-                     dest = 'gpu_affinity',
-                     action = 'store_true',
-                     default = True,
-                     help = 'enable GPU affinity [default: True]')
-  group.add_argument('--no-gpu-affinity',
-                     dest = 'gpu_affinity',
-                     action = 'store_false',
-                     help = 'disable GPU affinity')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('-l', '--logdir',
-                     dest = 'logdir',
-                     action = 'store',
-                     default = 'logs',
-                     help = 'path to output directory for log files (if empty, logs are not stored) [default: "logs"]')
-  group.add_argument('--no-logdir',
-                     dest = 'logdir',
-                     action = 'store_const',
-                     const = '',
-                     help = 'do not store log files (equivalent to "--logdir \'\'")')
-
-  parser.add_argument('-k', '--keep',
-                      dest = 'keep',
-                      nargs = '+',
-                      default = ['resources.json'],
-                      help = 'list of additional output files to be kept in logdir, along with the logs [default: "resources.json"]')
-
-  parser.add_argument('--tmpdir',
-                      dest = 'tmpdir',
-                      action = 'store',
-                      default = None,
-                      help = 'path to temporary directory used at runtime [default: None, to use a system-dependent default temporary directory]')
-
-  opts, opts_unknown = parser.parse_known_args()
-  if len(opts_unknown) > 0:
-    print("There are unknown options:")
-    for u in opts_unknown:
-      print(u)
-    print("Aborting.")
-    sys.exit(1)
-
-  return opts
 
 def printJobInfo(opts, steps):
   print("""
 Selected Configuration:
-
   - config:       {}
   - steps:        {}
   - IO benchmark: {}
@@ -229,6 +73,7 @@ Selected Configuration:
            opts.threads,
            opts.streams))
 
+
 if __name__ == "__main__":
   if not 'CMSSW_BASE' in os.environ:
     print('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".')
@@ -238,7 +83,7 @@ if __name__ == "__main__":
 
   process = parseProcess(opts.config)
 
-  # options passed to multiCmsRun
+  # common options for multirun
   options = {
     'verbose'             : opts.verbose,
     'plumbing'            : opts.plumbing,
@@ -250,8 +95,10 @@ if __name__ == "__main__":
     'streams'             : opts.streams,
     'gpus_per_job'        : opts.gpus_per_job,
     'allow_hyperthreading': opts.allow_hyperthreading,
+    'set_numa_affinity'   : opts.numa_affinity,
     'set_cpu_affinity'    : opts.cpu_affinity,
     'set_gpu_affinity'    : opts.gpu_affinity,
+    'slots'               : opts.slots,
     'executable'          : opts.executable,
     'logdir'              : opts.logdir if opts.logdir else None,
     'tmpdir'              : opts.tmpdir,
