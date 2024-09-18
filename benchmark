@@ -1,11 +1,10 @@
 #! /usr/bin/env python3
-"""benchmark: run N jobs with T threads and S streams over N GPUs
-"""
-import argparse
+
 import sys
 import os
 import copy
 
+from options import OptionParser
 from multirun import *
 from slot import Slot
 import FWCore.ParameterSet.Config as cms
@@ -15,212 +14,10 @@ if __name__ == "__main__":
     print('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".')
     sys.exit(1)
 
-  ### args
-  parser = argparse.ArgumentParser(
-    formatter_class = argparse.RawDescriptionHelpFormatter,
-    description = __doc__,
-    epilog = """
-JOB SLOTS
+  parser = OptionParser()
+  opts = parser.parse(sys.argv[1:])
 
-The execution environment for each job (NUMA nodes for the cpus, NUMA nodes for the memory, individual cpus, NVIDIA and AMD GPUs) can be given explicitly with the '--slot SLOT' option.
-This options disables the automatic job assignment to CPUs and GPUs, and makes the program ignore the options '--numa-affinity', '--cpu-affinity' and '--gpu-affinity'.
-Each '--slot' option describes the execution environment for a single job. If theare more jobs (see the --jobs option) than slots, they are reused in a round-robin fashion until all jobs are allocated.
-The format of SLOT is a colon-separated list of fields, where each field has the format 'keyword=value'.
-The possible fields, their formats and descriptions are:
-   [numa|n]=NODES           where NODES indicates the NUMA nodes of the CPUs to be used by the job;
-   [mem|m]=NODES            where NODES indicates the NUMA nodes of the memory to be used by the job;
-   [cpu|c]=CPUS             where CPUS indicates the individual CPUs to be used by the job;
-   [gpu-nvidia|nv]=GPUS     where GPUS indicates the NVIDIA GPUs to be used by the job;
-   [gpu-amd|amd]=GPUS       where GPUS indicates the AMD GPUs to be used by the job.
-
-All fields are optional, but at least one field must be given. Each field should be specified at most once.
-
-NODES should be a comma-separated list of integers or integer ranges, representing the NUMA nodes in the system.
-If not specified, or if an empty list is used, no restrictions on the NUMA nodes are applied.
-
-CPUS should be a comma-separated list of integers or integer ranges, representing the individual CPUs in the system.
-If not specified, or if an empty list is used, no restrictions on the CPUs are applied.
-
-GPUS should be a comma-separated list of integers, integer ranges, or GPU UUIDs representing the NVIDIA or AMD GPUs in the system.
-If not specified, no restrictions on the GPUs are applied.
-If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
-""")
-
-  parser.add_argument('configs',
-                      type = str,
-                      nargs = '+',
-                      help = 'list of cmsRun configuration files')
-
-  parser.add_argument('-v', '--verbose',
-                      dest = 'verbose',
-                      action = 'store_true',
-                      default = False,
-                      help = 'enable verbose mode [default: False]')
-
-  parser.add_argument('-E', '--executable',
-                      dest = 'executable',
-                      action = 'store',
-                      type = str,
-                      default = 'cmsRun',
-                      help = 'specify what executable to run [default: cmsRun]')
-
-  parser.add_argument('-e', '--events',
-                      dest = 'events',
-                      action = 'store',
-                      type = int,
-                      default = 10300,
-                      help = 'number of events per cmsRun job [default: 10300]')
-
-  parser.add_argument('-j', '--jobs',
-                      dest = 'jobs',
-                      action = 'store',
-                      type = int,
-                      default = 2,
-                      help = 'number of concurrent cmsRun jobs per measurement [default: 2]')
-
-  parser.add_argument('-r', '--repeats',
-                      dest = 'repeats',
-                      action = 'store',
-                      type = int,
-                      default = 3,
-                      help = 'repeat each measurement N times [default: 3]')
-
-  parser.add_argument('-t', '--threads',
-                      dest = 'threads',
-                      action = 'store',
-                      type = int,
-                      default = None,
-                      help = 'number of threads used in each cmsRun job [default: None -> set automatically to use the whole machine]')
-
-  parser.add_argument('-s', '--streams',
-                      dest = 'streams',
-                      action = 'store',
-                      type = int,
-                      default = None,
-                      help = 'number of streams used in each cmsRun job [default: None -> set automatically to use the whole machine]')
-
-  parser.add_argument('-g', '--gpus-per-job',
-                      dest = 'gpus_per_job',
-                      action = 'store',
-                      type = int,
-                      default = 1,
-                      help = 'number of GPUs used in each cmsRun job [default: 1]')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--run-io-benchmark',
-                      dest = 'run_io_benchmark',
-                      action= 'store_true',
-                      default = True,
-                      help = 'measure the I/O benchmarks before the other measurements [default: True]')
-  group.add_argument('--no-run-io-benchmark',
-                      dest = 'run_io_benchmark',
-                      action= 'store_false',
-                      help = 'skip the I/O measurement')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--warmup',
-                     dest = 'warmup',
-                     action = 'store_true',
-                     default = True,
-                     help = 'do a warmup run before the measurements [default: True]')
-  group.add_argument('--no-warmup',
-                     dest = 'warmup',
-                     action = 'store_false',
-                     help = 'skip the warmup run')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('-p', '--plumbing',
-                     dest = 'plumbing',
-                     action = 'store_true',
-                     default = False,
-                     help = 'enable plumbing output [default: False]')
-  group.add_argument('--no-plumbing',
-                     dest = 'plumbing',
-                     action = 'store_false',
-                     help = 'disable plumbing output')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--allow-hyperthreading',
-                     dest = 'allow_hyperthreading',
-                     action = 'store_true',
-                     default = True,
-                     help = 'allow HyperThreading/Simultaneous multithreading (used only if cpu_affinity = True) [default: True]')
-  group.add_argument('--no-hyperthreading',
-                     dest = 'allow_hyperthreading',
-                     action = 'store_false',
-                     help = 'do not allow HyperThreading/Simultaneous multithreading (used only if cpu_affinity = True)')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('-n', '--numa-affinity',
-                     dest = 'numa_affinity',
-                     action = 'store_true',
-                     default = False,
-                     help = 'enable NUMA affinity [default: False]')
-  group.add_argument('--no-numa-affinity',
-                     dest = 'numa_affinity',
-                     action = 'store_false',
-                     help = 'disable NUMA affinity')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--cpu-affinity',
-                     dest = 'cpu_affinity',
-                     action = 'store_true',
-                     default = True,
-                     help = 'enable CPU affinity [default: True]')
-  group.add_argument('--no-cpu-affinity',
-                     dest = 'cpu_affinity',
-                     action = 'store_false',
-                     help = 'disable CPU affinity')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('--gpu-affinity',
-                     dest = 'gpu_affinity',
-                     action = 'store_true',
-                     default = True,
-                     help = 'enable GPU affinity [default: True]')
-  group.add_argument('--no-gpu-affinity',
-                     dest = 'gpu_affinity',
-                     action = 'store_false',
-                     help = 'disable GPU affinity')
-
-  parser.add_argument('-S', '--slot',
-                      dest = 'slots',
-                      metavar = 'SLOT',
-                      action = 'append',
-                      type = Slot.parse,
-                      default = [],
-                      help = 'ignores --numa-affinity, --cpu-affinity, --gpu-affinity, and define explicitly the execution environment for a job slot (see below)')
-
-  group = parser.add_mutually_exclusive_group()
-  group.add_argument('-l', '--logdir',
-                     dest = 'logdir',
-                     action = 'store',
-                     default = 'logs',
-                     help = 'path to output directory for log files (if empty, logs are not stored) [default: "logs"]')
-  group.add_argument('--no-logdir',
-                     dest = 'logdir',
-                     action = 'store_const',
-                     const = '',
-                     help = 'do not store log files (equivalent to "--logdir \'\'")')
-
-  parser.add_argument('-k', '--keep',
-                      dest = 'keep',
-                      nargs = '+',
-                      default = ['resources.json'],
-                      help = 'list of additional output files to be kept in logdir, along with the logs [default: "resources.json"]')
-
-  parser.add_argument('--tmpdir',
-                      dest = 'tmpdir',
-                      action = 'store',
-                      default = None,
-                      help = 'path to temporary directory used at runtime [default: None, to use a system-dependent default temporary directory]')
-
-  opts, opts_unknown = parser.parse_known_args()
-  ### ----
-
-  if len(opts_unknown) > 0:
-    raise RuntimeError('unsupported command-line arguments: '+str(opts_unknown))
-
+  # common options for multirun
   options = {
     'verbose'             : opts.verbose,
     'plumbing'            : opts.plumbing,
@@ -266,12 +63,6 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
   # the number of streams defaults to the number of threads per job
   if options['streams'] is None:
     options['streams'] = options['threads']
-
-  # if explicit job slots have been defined, disable the '--numa-affinity', '--cpu-affinity' and '--gpu-affinity' options
-  if options['slots']:
-      options['set_numa_affinity'] = False
-      options['set_cpu_affinity'] = False
-      options['set_gpu_affinity'] = False
 
   for config in opts.configs:
     process = parseProcess(config)
