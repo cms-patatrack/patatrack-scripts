@@ -30,6 +30,7 @@ import FWCore.ParameterSet.Config as cms
 
 from cpuinfo import *
 from gpuinfo import *
+from slot import Slot
 from threaded import threaded
 
 cpus = get_cpu_info()
@@ -49,44 +50,31 @@ def is_iterable(item):
 
 
 @threaded
-def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, cpus = None, numa_cpu = None, numa_mem = None, gpus = None, *args):
-  command = (executable, filename) + args
+def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, slot = None, *args):
+  if slot is None:
+      slot = Slot()
 
-  # optionally set CPU affinity
-  if cpus is not None:
-    command = ('taskset', '-c', cpus) + command
-
-  # optionally set NUMA affinity
-  if numa_cpu is not None or numa_mem is not None:
-    numa_cmd = ('numactl', )
-    numa_cpu_opt = '-N'
-    numa_mem_opt = '-m'
-    # run on the CPUs of the NUMA nodes "numa_cpu";
-    # NUMA nodes may consist of multiple CPUs
-    if numa_cpu is not None:
-      if is_iterable(numa_cpu) and numa_cpu:
-        numa_cmd += (numa_cpu_opt, ','.join(numa_cpu))
-      else:
-        numa_cmd += (numa_cpu_opt, str(numa_cpu))
-    # allocate memory only from the NUMA nodes "numa_mem";
-    # allocations will fail when there is not enough memory available on these nodes
-    if numa_mem is not None:
-      if is_iterable(numa_mem) and numa_mem:
-        numa_cmd += (numa_mem_opt, ','.join(numa_mem))
-      else:
-        numa_cmd += (numa_mem_opt, str(numa_mem))
-    command = numa_cmd + command
-
-  # compose the command line for the verbose option
+  # command to execute
+  command = [ executable, filename ] + list(args)
+  # shell environment
+  environment = os.environ.copy()
+  # command line for the verbose option
   cmdline = ' '.join(command) + ' &'
 
-  # optionally set GPU affinity
-  environment = os.environ.copy()
-  if gpus is not None:
-    environment['CUDA_VISIBLE_DEVICES'] = gpus
-    cmdline = 'CUDA_VISIBLE_DEVICES=' + gpus + ' ' + cmdline
+  # optionally set NUMA affinity, CPU affinity, and GPU selection
+  prefix, environ = slot.get_execution_parameters()
+  # update the command to execute
+  if prefix:
+      command = prefix + command
+  # update the shell environment for the command
+  if environ:
+      environment.update(environ)
+  # update the command line for the verbose option
+  if prefix or environ:
+      cmdline = slot.get_command_line_prefix() + cmdline
 
   if verbose:
+    #print('Running "' + ' '.join((executable, filename) + args) + '"', slot.describe())
     print(cmdline)
     sys.stdout.flush()
 
@@ -281,9 +269,9 @@ def multiCmsRun(
   if set_numa_affinity:
     # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
     nodes = sum(len(cpu.nodes) for cpu in cpus.values())
-    numa_cpu_nodes = [ job % nodes for job in range(jobs) ]
-    numa_mem_nodes = [ job % nodes for job in range(jobs) ]             # use only DDR5
-    #numa_mem_nodes = [ job % nodes + nodes for job in range(jobs) ]     # use only HBM
+    numa_cpu_nodes = [ str(job % nodes) for job in range(jobs) ]
+    numa_mem_nodes = [ str(job % nodes) for job in range(jobs) ]             # use only DDR5
+    #numa_mem_nodes = [ str(job % nodes + nodes) for job in range(jobs) ]     # use only HBM
 
   cpu_assignment = [ None ] * jobs
   if set_cpu_affinity:
@@ -302,7 +290,7 @@ def multiCmsRun(
 
     # if all the jobs fit within individual sockets, assing jobs to sockets in a round-robin
     if len(cpu_list) // len(cpus) // threads * len(cpus) >= jobs:
-      cpu_assignment = [ list() for i in range(jobs) ]
+      cpu_assignment = [ '' for i in range(jobs) ]
       if allow_hyperthreading:
         available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in cpus.values() ]
       else:
@@ -336,6 +324,9 @@ def multiCmsRun(
       gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
       gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
 
+  # define the exdecution environments
+  slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment[job], amd_gpus = None) for job in range(jobs) ]
+
   if warmup:
     print('Warming up')
     sys.stdout.flush()
@@ -356,7 +347,7 @@ def multiCmsRun(
           os.makedirs(daqdir, exists_ok = True)
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
-      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = [], verbose = verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = [], verbose = verbose, slot = slots[job], *args)
 
     # start all threads
     for thread in job_threads:
@@ -425,7 +416,7 @@ def multiCmsRun(
           os.makedirs(daqdir, exists_ok = True)
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
-      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = keep, verbose = verbose, cpus = cpu_assignment[job], gpus = gpu_assignment[job], numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], *args)
+      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = keep, verbose = verbose, slot = slots[job], *args)
 
     # start all threads
     for thread in job_threads:
