@@ -39,9 +39,6 @@ if __name__ == "__main__":
     'keep'                : opts.keep,
   }
 
-  # measure the throughput for reading the input data
-  run_io_benchmark = opts.run_io_benchmark
-
   # print a system overview
   info()
 
@@ -64,24 +61,22 @@ if __name__ == "__main__":
   if options['streams'] is None:
     options['streams'] = options['threads']
 
-  for config in opts.configs:
-    process = parseProcess(config)
+  process = parseProcess(opts.config)
 
-    if run_io_benchmark:
-      # prepare a trimmed down configuration for benchmarking only reading the input data
-      io_process = copy.deepcopy(process)
-      io_process.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
-      io_process.path = cms.Path(io_process.hltGetRaw)
-      io_process.schedule = cms.Schedule(io_process.path)
-      if 'PrescaleService' in io_process.__dict__:
-        del io_process.PrescaleService
+  if opts.run_io_benchmark:
+    # prepare a trimmed down configuration for benchmarking only reading the input data
+    io_process = copy.deepcopy(process)
+    io_process.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
+    io_process.path = cms.Path(io_process.hltGetRaw)
+    io_process.schedule = cms.Schedule(io_process.path)
+    if 'PrescaleService' in io_process.__dict__:
+      del io_process.PrescaleService
 
-      # benchmark reading the input data
-      print('Benchmarking only I/O')
-      io_options = dict(options, logdir = None, keep = [])
-      multiCmsRun(io_process, **io_options)
-      run_io_benchmark = False
-      print()
+    # benchmark reading the input data
+    print('Benchmarking only I/O')
+    io_options = dict(options, logdir = None, keep = [])
+    multiCmsRun(io_process, **io_options)
+    print()
 
-    print('Benchmarking %s' % config)
-    multiCmsRun(process, **options)
+  print('Benchmarking %s' % config)
+  multiCmsRun(process, **options)
