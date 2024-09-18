@@ -36,10 +36,10 @@ If not specified, no restrictions on the GPUs are applied.
 If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
 """)
 
-        self.parser.add_argument('configs',
+        self.parser.add_argument('config',
             type = str,
-            nargs = '+',
-            help = 'list of cmsRun configuration files')
+            metavar = 'config.py',
+            help = 'cmsRun configuration file to execute')
 
         self.parser.add_argument('-v', '--verbose',
             dest = 'verbose',
