@@ -38,13 +38,6 @@ gpus = get_gpu_info()
 
 epoch = datetime.now()
 
-def is_iterable(item):
-  try:
-    iter(item)
-    return True
-  except TypeError:
-    return False
-
 
 @threaded
 def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, slot = None, *args):
@@ -80,30 +73,39 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   logfiles = tuple('%s/%s' % (workdir, name) for name in lognames)
   stdout = open(logfiles[0], 'w')
   stderr = open(logfiles[1], 'w')
-  start = datetime.now()
-  job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
+  
+  # collect the monitoring information about the subprocess
+  buffer_type = np.dtype([('time', 'datetime64[ms]'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
+  buffer_data = []
 
+  # start the subprocess
+  timestamp = datetime.now()
+  buffer_data.append((timestamp, 0, 0, 0))  # time, vsize, rss, pss
+  job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
   proc = psutil.Process(job.pid)
-  raw_data = []
-  while True:
+
+  while job.poll() is None:
+    # sleep for 1 second
+    time.sleep(1.)
+    # flush the subprocess stdin, stdout and stderr
+    try:
+        job.communicate(timeout=0.)
+    except subprocess.TimeoutExpired:
+        pass
+    # measure the subprocess memory usage
     try:
       with proc.oneshot():
-        timet = datetime.now()
+        timestamp = datetime.now()
         mem = proc.memory_full_info()
-        raw_data.append(((timet - start).total_seconds(), mem.vms, mem.rss, mem.pss))  # time, vsz, rss, pss
+        buffer_data.append((timestamp, mem.vms, mem.rss, mem.pss))  # time, vsize, rss, pss
     except psutil.NoSuchProcess:
       break
-    try:
-      job.communicate()
-      time.sleep(1)
-      break
-    except subprocess.TimeoutExpired:
-      pass
+
+  # flush the subprocess stdin, stdout and stderr
   job.communicate()
   stdout.close()
   stderr.close()
-  types = np.dtype([('time', 'float'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
-  monitoring_data = np.array(raw_data, types)
+  monitoring_data = np.array(buffer_data, buffer_type)
 
   # if requested, move the logs and any additional artifacts to the log directory
   if logdir:
@@ -290,7 +292,6 @@ def multiCmsRun(
       #     the jobs should automatically be split on socket boundaries
       #   - otherwise some jobs may span multiple sockets, e.g.
       #     [ 0,2,4,6 ], [ 8,10,12,14 ], [ 16,18,20,22 ], [ 24,26,1,3 ], [ 5,7,9,11 ], [ 13,15,17,19 ], [ 21,23,25,27 ]
-      # TODO: set the processor assignment as an argument, to support arbitrary splitting
       if allow_hyperthreading:
         cpu_list = list(itertools.chain(*(list(map(str, cpu.hardware_threads)) for cpu in cpus.values())))
       else:
@@ -324,7 +325,6 @@ def multiCmsRun(
       #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
       #     run each job on all GPUs
       #   - otherwise, assign GPUs to jobs in a round-robin fashon
-      # TODO: set the GPU assignment as an argument, to support arbitrary splitting
       if gpus_per_job >= len(gpus):
         gpu_assignment = [ ','.join(map(str, list(gpus.keys()))) for i in range(jobs) ]
       else:
