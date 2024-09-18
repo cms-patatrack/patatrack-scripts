@@ -220,7 +220,8 @@ def multiCmsRun(
     allow_hyperthreading = True,    # whether to use extra CPU cores from HyperThreading
     set_numa_affinity = False,      # FIXME - run each job in a single NUMA node
     set_cpu_affinity = False,       # whether to set CPU affinity
-    set_gpu_affinity = False,       # whether yo set GPU affinity
+    set_gpu_affinity = False,       # whether to set GPU affinity
+    slots = [],                     # explit job execution environment
     executable = 'cmsRun',          # executable to run, usually cmsRun
     *args):                         # additional arguments passed to the executable
 
@@ -264,68 +265,75 @@ def multiCmsRun(
   config.write(process.dumpPython())
   config.close()
 
-  numa_cpu_nodes = [ None ] * jobs
-  numa_mem_nodes = [ None ] * jobs
-  if set_numa_affinity:
-    # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
-    nodes = sum(len(cpu.nodes) for cpu in cpus.values())
-    numa_cpu_nodes = [ str(job % nodes) for job in range(jobs) ]
-    numa_mem_nodes = [ str(job % nodes) for job in range(jobs) ]             # use only DDR5
-    #numa_mem_nodes = [ str(job % nodes + nodes) for job in range(jobs) ]     # use only HBM
+  if slots:
+    # explicit description of the job slots
+    slots = list(itertools.islice(itertools.cycle(slots), jobs))
 
-  cpu_assignment = [ None ] * jobs
-  if set_cpu_affinity:
-    # build the list of CPUs for each job:
-    #   - build a list of all "processors", grouped by sockets, cores and hardware threads, e.g.
-    #     [ 0,2,4,6,8,10,12,14,16,18,20,22,24,26,1,3,5,7,9,11,13,15,17,19,21,23,25,27 ]
-    #   - split the list by the number of jobs; if the number of jobs is a multiple of the number of sockets
-    #     the jobs should automatically be split on socket boundaries
-    #   - otherwise some jobs may span multiple sockets, e.g.
-    #     [ 0,2,4,6 ], [ 8,10,12,14 ], [ 16,18,20,22 ], [ 24,26,1,3 ], [ 5,7,9,11 ], [ 13,15,17,19 ], [ 21,23,25,27 ]
-    # TODO: set the processor assignment as an argument, to support arbitrary splitting
-    if allow_hyperthreading:
-      cpu_list = list(itertools.chain(*(list(map(str, cpu.hardware_threads)) for cpu in cpus.values())))
-    else:
-      cpu_list = list(itertools.chain(*(list(map(str, cpu.physical_processors)) for cpu in cpus.values())))
+  else:
+    # try to build jb slots based on various heuristics
+    numa_cpu_nodes = [ None ] * jobs
+    numa_mem_nodes = [ None ] * jobs
+    gpu_assignment = [ None ] * jobs
+    cpu_assignment = [ None ] * jobs
 
-    # if all the jobs fit within individual sockets, assing jobs to sockets in a round-robin
-    if len(cpu_list) // len(cpus) // threads * len(cpus) >= jobs:
-      cpu_assignment = [ '' for i in range(jobs) ]
+    if set_numa_affinity:
+      # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
+      nodes = sum(len(cpu.nodes) for cpu in cpus.values())
+      numa_cpu_nodes = [ str(job % nodes) for job in range(jobs) ]
+      numa_mem_nodes = [ str(job % nodes) for job in range(jobs) ]             # use only DDR5
+      #numa_mem_nodes = [ str(job % nodes + nodes) for job in range(jobs) ]     # use only HBM
+
+    if set_cpu_affinity:
+      # build the list of CPUs for each job:
+      #   - build a list of all "processors", grouped by sockets, cores and hardware threads, e.g.
+      #     [ 0,2,4,6,8,10,12,14,16,18,20,22,24,26,1,3,5,7,9,11,13,15,17,19,21,23,25,27 ]
+      #   - split the list by the number of jobs; if the number of jobs is a multiple of the number of sockets
+      #     the jobs should automatically be split on socket boundaries
+      #   - otherwise some jobs may span multiple sockets, e.g.
+      #     [ 0,2,4,6 ], [ 8,10,12,14 ], [ 16,18,20,22 ], [ 24,26,1,3 ], [ 5,7,9,11 ], [ 13,15,17,19 ], [ 21,23,25,27 ]
+      # TODO: set the processor assignment as an argument, to support arbitrary splitting
       if allow_hyperthreading:
-        available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in cpus.values() ]
+        cpu_list = list(itertools.chain(*(list(map(str, cpu.hardware_threads)) for cpu in cpus.values())))
       else:
-        available_cpus = [ copy.copy(cpu.physical_processors) for cpu in cpus.values() ]
-      for job in range(jobs):
-        socket = job % len(cpus)
-        cpu_assignment[job] = ','.join(map(str, available_cpus[socket][0:threads]))
-        del available_cpus[socket][0:threads]
+        cpu_list = list(itertools.chain(*(list(map(str, cpu.physical_processors)) for cpu in cpus.values())))
 
-    # otherwise, split the list by the number of jobs, and possibly overcommit
-    else:
-      if len(cpu_list) >= jobs * threads:
-        # split the list by the number of jobs
-        index = [ i * threads for i in range(jobs+1) ]
+      # if all the jobs fit within individual sockets, assing jobs to sockets in a round-robin
+      if len(cpu_list) // len(cpus) // threads * len(cpus) >= jobs:
+        cpu_assignment = [ '' for i in range(jobs) ]
+        if allow_hyperthreading:
+          available_cpus = [ copy.copy(cpu.hardware_threads) for cpu in cpus.values() ]
+        else:
+          available_cpus = [ copy.copy(cpu.physical_processors) for cpu in cpus.values() ]
+        for job in range(jobs):
+          socket = job % len(cpus)
+          cpu_assignment[job] = ','.join(map(str, available_cpus[socket][0:threads]))
+          del available_cpus[socket][0:threads]
+
+      # otherwise, split the list by the number of jobs, and possibly overcommit
       else:
-        # fill all cpus and overcommit
-        index = [ i * len(cpu_list) // jobs for i in range(jobs+1) ]
+        if len(cpu_list) >= jobs * threads:
+          # split the list by the number of jobs
+          index = [ i * threads for i in range(jobs+1) ]
+        else:
+          # fill all cpus and overcommit
+          index = [ i * len(cpu_list) // jobs for i in range(jobs+1) ]
 
-      cpu_assignment = [ ','.join(cpu_list[index[i]:index[i+1]]) for i in range(jobs) ]
+        cpu_assignment = [ ','.join(cpu_list[index[i]:index[i+1]]) for i in range(jobs) ]
 
-  gpu_assignment = [ None ] * jobs
-  if set_gpu_affinity:
-    # build the list of GPUs for each job:
-    #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
-    #     run each job on all GPUs
-    #   - otherwise, assign GPUs to jobs in a round-robin fashon
-    # TODO: set the GPU assignment as an argument, to support arbitrary splitting
-    if gpus_per_job >= len(gpus):
-      gpu_assignment = [ ','.join(map(str, list(gpus.keys()))) for i in range(jobs) ]
-    else:
-      gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
-      gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
+    if set_gpu_affinity:
+      # build the list of GPUs for each job:
+      #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
+      #     run each job on all GPUs
+      #   - otherwise, assign GPUs to jobs in a round-robin fashon
+      # TODO: set the GPU assignment as an argument, to support arbitrary splitting
+      if gpus_per_job >= len(gpus):
+        gpu_assignment = [ ','.join(map(str, list(gpus.keys()))) for i in range(jobs) ]
+      else:
+        gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
+        gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
 
-  # define the exdecution environments
-  slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment[job], amd_gpus = None) for job in range(jobs) ]
+    # define the execution environments
+    slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment[job], amd_gpus = None) for job in range(jobs) ]
 
   if warmup:
     print('Warming up')
@@ -581,6 +589,7 @@ if __name__ == "__main__":
     'set_numa_affinity'   : False,
     'set_cpu_affinity'    : True,
     'set_gpu_affinity'    : True,
+    'slots'               : [],
   }
 
   # TODO parse arguments and options from the command line
