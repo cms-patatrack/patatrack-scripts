@@ -38,9 +38,6 @@ gpus = get_gpu_info()
 
 epoch = datetime.now()
 
-# skip at least this many events at the beginning of a job when measuring the throughput
-skipevents = 300
-
 def is_iterable(item):
   try:
     iter(item)
@@ -212,6 +209,8 @@ def multiCmsRun(
     verbose = False,                # whether to print extra messages
     plumbing = False,               # print output in a machine-readable format
     events = -1,                    # number of events to process (default: unlimited)
+    resolution = 100,               # sample the number of processed events with the given resolution (default: 100)
+    skipevents = 300,               # skip the firts EVENTS in each job, rounded to the next multiple of the event resulution (default: 300)
     repeats = 1,                    # number of times to repeat each job (default: 1)
     jobs = 1,                       # number of jobs to run in parallel (default: 1)
     threads = 1,                    # number of CPU threads per job (default: 1)
@@ -232,13 +231,13 @@ def multiCmsRun(
   # set the number of events to process
   process.maxEvents.input = cms.untracked.int32( events )
 
-  # print a message every 100 events
+  # print a message every "resolution" events
   if not 'ThroughputService' in process.__dict__:
     process.ThroughputService = cms.Service('ThroughputService',
       enableDQM = cms.untracked.bool(False),
     )
   process.ThroughputService.printEventSummary = cms.untracked.bool(True)
-  process.ThroughputService.eventResolution = cms.untracked.uint32(100)
+  process.ThroughputService.eventResolution = cms.untracked.uint32(resolution)
   if events > -1:
     process.ThroughputService.eventRange = cms.untracked.uint32(events)
 
