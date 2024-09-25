@@ -36,8 +36,6 @@ from threaded import threaded
 cpus = get_cpu_info()
 gpus = get_gpu_info()
 
-epoch = datetime.now()
-
 
 @threaded
 def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, slot = None, *args):
@@ -73,7 +71,7 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   logfiles = tuple('%s/%s' % (workdir, name) for name in lognames)
   stdout = open(logfiles[0], 'w')
   stderr = open(logfiles[1], 'w')
-  
+
   # collect the monitoring information about the subprocess
   buffer_type = np.dtype([('time', 'datetime64[ms]'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
   buffer_data = []
@@ -170,11 +168,12 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
 
     # read the matching lines
     event = int(matches.group(1))
-    timet = datetime.strptime(matches.group(2), date_format)
+    event_time = datetime.strptime(matches.group(2), date_format)
     events.append(event)
-    times.append((timet - epoch).total_seconds())
+    times.append(event_time)
 
   stderr.close()
+  # FIXME write events, times to a python file in the job directory
   return (tuple(events), tuple(times), monitoring_data)
 
 
@@ -392,8 +391,10 @@ def multiCmsRun(
   # store the values to compute the average throughput over the repetitions
   failed = [ False ] * repeats
   if repeats > 1 and not plumbing:
-    throughputs = [ None ] * repeats
-    overlaps    = [ None ] * repeats
+    throughputs         = [ None ] * repeats
+    overlaps            = [ None ] * repeats
+    overlap_throughputs = [ None ] * repeats
+    overlap_ranges      = [ None ] * repeats
 
   # store performance points for later analysis
   if data and header:
@@ -402,11 +403,13 @@ def multiCmsRun(
   iterations = range(repeats) if repeats > 0 else itertools.count()
   for repeat in iterations:
     # run the jobs reading the output to extract the event throughput
-    events      = [ None ] * jobs
-    times       = [ None ] * jobs
-    fits        = [ None ] * jobs
-    monit       = [ None ] * jobs
-    job_threads = [ None ] * jobs
+    events       = [ None ] * jobs
+    times        = [ None ] * jobs
+    fits         = [ None ] * jobs
+    overlap_fits = [ None ] * jobs
+    overlap_size = [ None ] * jobs
+    monit        = [ None ] * jobs
+    job_threads  = [ None ] * jobs
     # recreate logs' directory
     if logdir is not None:
       thislogdir = logdir + '/step%04d' % repeat
@@ -448,7 +451,8 @@ def multiCmsRun(
         continue
       # skip the entries before skipevents
       ne = tuple(e[i] for i in range(len(e)) if e[i] >= skipevents)
-      nt = tuple(t[i] for i in range(len(e)) if e[i] >= skipevents)
+      # convert to seconds since the POSIX epoch
+      nt = tuple(t[i].timestamp() for i in range(len(e)) if e[i] >= skipevents)
       e = ne
       t = nt
       consistent_events[e] += 1
@@ -479,27 +483,63 @@ def multiCmsRun(
         sys.stdout.flush()
         inconsistent = True
 
-    # delete data from inconsistent jobs
+    # skip the results from inconsistent jobs
     if inconsistent:
       print('Inconsistent results detected, this measurement will be ignored')
       sys.stdout.flush()
       failed[repeat] = True
       continue
 
+    # find the overlapping ranges
+    if jobs > 1:
+      overlap_start = max(times[job][0] for job in range(jobs))
+      overlap_stop  = min(times[job][-1] for job in range(jobs))
+      # if overlap_start is >= overlap_stop, there is no overlap
+      if overlap_start >= overlap_stop:
+        overlap_fits = None
+        overlap_size = None
+      else:
+        for job in range(jobs):
+          start_index = times[job].searchsorted(overlap_start, 'left')
+          stop_index  = times[job].searchsorted(overlap_stop, 'right')
+          e = events[job][start_index:stop_index]
+          t = times[job][start_index:stop_index]
+          overlap_fits[job] = stats.linregress(t, e)
+          overlap_size[job] = e[-1] - e[0]
+
     # measure the average throughput
     used_events = reference_events[-1] - reference_events[0]
     throughput  = sum(fit.slope for fit in fits)
     error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
+    if overlap_fits is None:
+        overlap_events     = 0
+        overlap_throughput = 0
+        overlap_error      = 0
+    else:
+        overlap_events     = min(overlap_size)
+        overlap_throughput = sum(fit.slope for fit in overlap_fits)
+        overlap_error      = math.sqrt(sum(fit.stderr * fit.stderr for fit in overlap_fits))
     if jobs > 1:
       # if running more than on job in parallel, estimate and print the overlap among them
       overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
       if overlap < 0.:
         overlap = 0.
-      # machine- or human-readable formatting
-      formatting = '%8.1f\t%8.1f\t%d\t%0.1f%%' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)'
-      print(formatting % (throughput, error, used_events, overlap * 100.))
+      if plumbing:
+        # machine- or human-readable formatting
+        print(', %8.1f\t%8.1f\t%d\t%0.1f%%\t%8.1f\t%8.1f\t%d' % (throughput, error, used_events, overlap * 100., overlap_throughput, overlap_error, overlap_events))
+      else:
+        # human-readable formatting
+        print('%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)' % (throughput, error, used_events, overlap * 100.), end='')
+        if overlap_events > 0:
+          print(', %8.1f \u00b1 %5.1f ev/s (\u2a7e %d events, overlap-only)' % (overlap_throughput, overlap_error, overlap_events))
+        else:
+          print()
     else:
+      # with a single job the overlap does not make sense
       overlap = 1.
+      overlap_events = used_events
+      overlap_throughput = throughput
+      overlap_error = error
       # machine- or human-readable formatting
       formatting = '%8.1f\t%8.1f\t%d' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events)'
       print(formatting % (throughput, error, used_events))
@@ -507,12 +547,14 @@ def multiCmsRun(
 
     # store the values to compute the average throughput over the repetitions
     if repeats > 1 and not plumbing:
-      throughputs[repeat] = throughput
-      overlaps[repeat]    = overlap
+      throughputs[repeat]         = throughput
+      overlaps[repeat]            = overlap
+      overlap_throughputs[repeat] = overlap_throughput
+      overlap_ranges[repeat]      = overlap_events
 
     # store performance points for later analysis
     if data:
-      data.write('%d, %f, %d, %d, %d, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, used_events, throughput, error))
+      data.write('%d, %f, %d, %d, %d, %d, %f, %f, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, used_events, throughput, error, overlap_events, overlap_throughput, overlap_error))
 
     # do something with the monitoring data
     if thislogdir is not None:
@@ -526,10 +568,12 @@ def multiCmsRun(
   # compute the average throughput over the repetitions
   if repeats > 1 and not plumbing:
     # filter out the failed or inconsistent jobs
-    throughputs = [ throughputs[i] for i in range(repeats) if not failed[i] ]
-    overlaps    = [ overlaps[i]    for i in range(repeats) if not failed[i] ]
+    throughputs         = [ throughputs[i] for i in range(repeats) if not failed[i] ]
+    overlaps            = [ overlaps[i]    for i in range(repeats) if not failed[i] ]
+    overlap_throughputs = [ overlap_throughputs[i] for i in range(repeats) if not failed[i] ]
+    overlap_ranges      = [ overlap_ranges[i] for i in range(repeats) if not failed[i] ]
     # filter out the jobs with an overlap lower than 90%
-    values      = [ throughputs[i] for i in range(len(throughputs)) if overlaps[i] >= 0.90 ]
+    values              = [ throughputs[i] for i in range(len(throughputs)) if overlaps[i] >= 0.90 ]
     n = len(values)
     if n > 1:
       value = np.average(values)
@@ -542,15 +586,23 @@ def multiCmsRun(
       # no valid jobs with an overlap > 90%, use the "best" one
       value = throughputs[overlaps.index(max(overlaps))]
       error = float('nan')
+    # overlap-only values
+    overlap_value = np.average(overlap_throughputs)
+    overlap_error = np.std(overlap_throughputs, ddof=1)
+    overlap_range = min(overlap_ranges)
+    # print the summary
     print(' --------------------')
     if n == repeats:
-      print('%8.1f \u00b1 %5.1f ev/s' % (value, error))
+      print('%8.1f \u00b1 %5.1f ev/s' % (value, error), end='')
     elif n > 1:
-      print('%8.1f \u00b1 %5.1f ev/s (based on %d measurements)' % (value, error, n))
+      print('%8.1f \u00b1 %5.1f ev/s (based on %d measurements)' % (value, error, n), end='')
     elif n > 0:
-      print('%8.1f ev/s (based on a single measurement)' % (value, ))
+      print('%8.1f ev/s (based on a single measurement)' % (value, ), end='')
     else:
-      print('%8.1f ev/s (single measurement with the highest overlap)' % (value, ))
+      print('%8.1f ev/s (single measurement with the highest overlap)' % (value, ), end='')
+    # print the overlap-only measurements only if at least one repetition had some overlap
+    if overlap_range > 0:
+      print(', %8.1f \u00b1 %5.1f ev/s (\u2a7e %d events, overlap-only)' % (overlap_value, overlap_error, overlap_range))
 
   if not plumbing:
     print()
