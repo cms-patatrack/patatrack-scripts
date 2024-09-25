@@ -626,29 +626,35 @@ def info():
 
 
 if __name__ == "__main__":
+  # parse the command line options
+  from options import OptionParser
+  parser = OptionParser()
+  opts = parser.parse(sys.argv[1:])
   options = {
-    'verbose'             : False,
-    'plumbing'            : False,
-    'warmup'              : True,
-    'events'              : 4200,
-    'repeats'             : 4,
-    'jobs'                : 2,
-    'threads'             :16,          # per job
-    'streams'             : 8,          # per job
-    'gpus_per_job'        : 2,          # per job
-    'allow_hyperthreading': True,
-    'set_numa_affinity'   : False,
-    'set_cpu_affinity'    : True,
-    'set_gpu_affinity'    : True,
-    'slots'               : [],
+    'verbose'             : opts.verbose,
+    'plumbing'            : opts.plumbing,
+    'warmup'              : opts.warmup,
+    'events'              : opts.events,
+    'resolution'          : opts.event_resolution,
+    'skipevents'          : opts.event_skip,
+    'repeats'             : opts.repeats,
+    'jobs'                : opts.jobs,
+    'threads'             : opts.threads,
+    'streams'             : opts.streams,
+    'gpus_per_job'        : opts.gpus_per_job,
+    'allow_hyperthreading': opts.allow_hyperthreading,
+    'set_numa_affinity'   : opts.numa_affinity,
+    'set_cpu_affinity'    : opts.cpu_affinity,
+    'set_gpu_affinity'    : opts.gpu_affinity,
+    'slots'               : opts.slots,
+    'executable'          : opts.executable,
+    'logdir'              : opts.logdir if opts.logdir else None,
+    'tmpdir'              : opts.tmpdir,
+    'keep'                : opts.keep,
   }
-
-  # TODO parse arguments and options from the command line
 
   if options['verbose']:
     info()
 
-  if len(sys.argv) > 1:
-    process = parseProcess(sys.argv[1])
-    multiCmsRun(process, **options)
-
+  process = parseProcess(opts.config)
+  multiCmsRun(process, **options)
