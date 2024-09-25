@@ -385,7 +385,7 @@ def multiCmsRun(
   else:
     n_events = 'all'
 
-  print('Running %s over %s events with %d jobs, each with %d threads, %d streams and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job))
+  print('Running %s over %s events with %d jobs, each with %d threads, %d streams, and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job))
   sys.stdout.flush()
 
   # store the values to compute the average throughput over the repetitions
