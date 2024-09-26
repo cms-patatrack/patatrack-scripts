@@ -240,11 +240,11 @@ def multiCmsRun(
     *args):                         # additional arguments passed to the executable
 
   # set the number of streams and threads
-  process.options.numberOfThreads = cms.untracked.uint32( threads )
-  process.options.numberOfStreams = cms.untracked.uint32( streams )
+  process.options.numberOfThreads = cms.untracked.uint32(threads)
+  process.options.numberOfStreams = cms.untracked.uint32(streams)
 
   # set the number of events to process
-  process.maxEvents.input = cms.untracked.int32( events )
+  process.maxEvents.input = cms.untracked.int32(events)
 
   # print a message every "resolution" events
   if not 'ThroughputService' in process.__dict__:
