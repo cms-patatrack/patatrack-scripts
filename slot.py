@@ -32,9 +32,9 @@ class Slot:
     # [cpu|c]=CPUS            where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
     slot_format_cpu = '(cpus|c)=' + nodes_format
     # [gpu-nvidia|nv]=GPUS    where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the NVIDIA GPUs to be used by the job
-    slot_format_gpu_nvidia = '(gpu-nvidia|nv)=' + gpus_format
+    slot_format_gpu_nvidia = '(gpu-nvidia|nv)=(' + gpus_format + ')?'
     # [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
-    slot_format_gpu_amd = '(gpu-amd|amd)=' + gpus_format
+    slot_format_gpu_amd = '(gpu-amd|amd)=(' + gpus_format + ')?'
     # any of the fields aboce
     slot_format_field = f'({slot_format_numa}|{slot_format_mem}|{slot_format_cpu}|{slot_format_gpu_nvidia}|{slot_format_gpu_amd})'
     # a colon-separated list of fields
