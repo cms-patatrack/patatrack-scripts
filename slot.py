@@ -15,6 +15,10 @@ import sys
 # Note: on a mixed system, setting CUDA_VISIBLE_DEVICES affects also the selection of AMD GPUs.
 
 class Slot:
+    # a single integer
+    integer_format = '-?[0-9]+'
+    integer_template = re.compile('^' + integer_format + '$')
+
     # a comma separated list of integers or integer ranges
     nodes_range = '[0-9]+(-[0-9]+)?'
     nodes_format = f'({nodes_range})(,{nodes_range})*'
@@ -25,6 +29,8 @@ class Slot:
     gpus_format = f'({gpus_range})(,{gpus_range})*'
     gpus_template = re.compile('^' + gpus_format + '$')
 
+    # [events|e]=EVENTS       where EVENTS is a positive integer, or -1 to run over all events in the input dataset, and overrides the --events options for this slot
+    slot_format_events = '(events|e)=' + integer_format
     # [numa|n]=NODES          where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the CPUs to be used by the job
     slot_format_numa = '(numa|n)=' + nodes_format
     # [mem|m]=NODES           where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the memory to be used by the job
@@ -35,31 +41,56 @@ class Slot:
     slot_format_gpu_nvidia = '(gpu-nvidia|nv)=(' + gpus_format + ')?'
     # [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
     slot_format_gpu_amd = '(gpu-amd|amd)=(' + gpus_format + ')?'
-    # any of the fields aboce
-    slot_format_field = f'({slot_format_numa}|{slot_format_mem}|{slot_format_cpu}|{slot_format_gpu_nvidia}|{slot_format_gpu_amd})'
+    # any of the fields above
+    slot_format_field = f'({slot_format_events}|{slot_format_numa}|{slot_format_mem}|{slot_format_cpu}|{slot_format_gpu_nvidia}|{slot_format_gpu_amd})'
     # a colon-separated list of fields
     slot_format = f'{slot_format_field}(:{slot_format_field})*'
     slot_template = re.compile('^' + slot_format + '$')
 
+
     # expand the range A-B into A,..,..,B
     @staticmethod
     def parse_int_range(arg):
+        msg = 'The argument is expected to be a string containing an integer or an integer range.'
+
         if not isinstance(arg, str):
-            raise TypeError('Expected a string argument')
+            raise TypeError(msg)
 
         if arg.count('-') == 0:
             return [int(arg)]
         elif arg.count('-') > 1:
-            raise ValueError('The argument is expected to be a string containing an integer or an integer range')
+            raise ValueError(msg)
 
         a,b = map(int,arg.split('-'))
         return list(range(a, b+1))
 
-    # parse an argument as a string, integer, or list of integers
+
+    # parse an argument as an integer
+    @staticmethod
+    def parse_integer(arg):
+        msg = 'The argument is expected to be None, or a string containing an integer.'
+
+        if not isinstance(arg, (type(None), str)):
+            raise TypeError(msg)
+
+        # None or an empty string indicate no restrictions
+        if not arg:
+            return None
+
+        # a single integer
+        if not Slot.integer_template.match(arg):
+            raise ValueError(msg)
+
+        return int(arg)
+
+
+    # parse an argument as an integer, or list of integers
     @staticmethod
     def parse_value(arg):
+        msg = 'The argument is expected to be None, or a string containing a comma-separated list of integers or integer ranges.'
+
         if not isinstance(arg, (type(None), str)):
-            raise TypeError('The argument is expected to be None, or a string containing a comma-separated list of integers or integer ranges.')
+            raise TypeError(msg)
 
         # None or an empty string indicate no restrictions
         if not arg:
@@ -67,7 +98,7 @@ class Slot:
 
         # a comma separated list of integers or integer ranges
         if not Slot.nodes_template.match(arg):
-            raise ValueError('The argument is expected to be None, or a string containing a comma-separated list of integers or integer ranges.')
+            raise ValueError(msg)
 
         return list(itertools.chain.from_iterable(Slot.parse_int_range(a) for a in arg.split(',')))
 
@@ -75,8 +106,10 @@ class Slot:
     # parse an argument as a GPU descriptor: either an integer or "GPU-" followed by a UUID, or a comma-separated list of them
     @staticmethod
     def parse_gpu_descriptor(arg):
+        msg = 'The argument is expected to be None, or a string containing a comma-separated list of integers, intege ranges or GPU UUIDs.'
+
         if not isinstance(arg, (type(None), str)):
-            raise TypeError('The argument is expected to be None, or a string containing a comma-separated list of integers, intege ranges or GPU UUIDs.')
+            raise TypeError(msg)
 
         # None represents no restrictions on what GPUs to use
         if arg is None:
@@ -88,7 +121,7 @@ class Slot:
 
         # a comma-separated list of integers, integer ranges, or GPU UUIDs
         if not Slot.gpus_template.match(arg):
-            raise ValueError('The argument is expected to be None, or a string containing a comma-separated list of integers, intege ranges or GPU UUIDs.')
+            raise ValueError(msg)
 
         v = []
         for a in arg.split(','):
@@ -99,7 +132,8 @@ class Slot:
         return v
 
 
-    def __init__(self, numa_cpu = None, numa_mem = None, cpus = None, nvidia_gpus = None, amd_gpus = None):
+    def __init__(self, events = None, numa_cpu = None, numa_mem = None, cpus = None, nvidia_gpus = None, amd_gpus = None):
+        self.events = Slot.parse_integer(events)
         self.numa_cpu = Slot.parse_value(numa_cpu)
         self.numa_mem = Slot.parse_value(numa_mem)
         self.cpus = Slot.parse_value(cpus)
@@ -107,6 +141,7 @@ class Slot:
         self.amd_gpus = Slot.parse_gpu_descriptor(amd_gpus)
 
 
+    # return "value" if "field=value" is given in arg, or None if field is not in arg
     @staticmethod
     def parse_field(arg, field):
         value = None
@@ -124,6 +159,7 @@ class Slot:
         # syntax:
         # arg should be a colon-separated list of fields, each field with the format keywork=value.
         # The possible fields are
+        #   [events|e]=EVENTS       where EVENTS is a positive integer, or -1 to run over all events in the input dataset, and overrides the --events options for this slot
         #   [numa|n]=NODES          where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the CPUs to be used by the job
         #   [mem|m]=NODES           where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the memory to be used by the job
         #   [cpu|c]=CPUS            where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
@@ -135,14 +171,14 @@ class Slot:
         if not Slot.slot_template.match(arg):
             raise ValueError('The argument does not match the slot syntax')
 
+        events = Slot.parse_field(arg, ('events', 'e'))
         numa_cpu = Slot.parse_field(arg, ('numa', 'n'))
         numa_mem = Slot.parse_field(arg, ('mem', 'm'))
         cpus = Slot.parse_field(arg, ('cpu', 'c'))
         nvidia_gpus = Slot.parse_field(arg, ('gpu-nvidia', 'nv'))
         amd_gpus = Slot.parse_field(arg, ('gpu-amd', 'amd'))
 
-        return Slot(numa_cpu, numa_mem, cpus, nvidia_gpus, amd_gpus)
-
+        return Slot(events, numa_cpu, numa_mem, cpus, nvidia_gpus, amd_gpus)
 
 
     # return the command prefix and environment for the execution environment described by the slot
@@ -165,6 +201,7 @@ class Slot:
             environ['HIP_VISIBLE_DEVICES'] = ','.join(self.amd_gpus)
 
         return command,environ
+
 
     # return the equivalent command line to be executed at a shell prompt
     def get_command_line_prefix(self):
@@ -214,6 +251,13 @@ class Slot:
         else:
             desc.append('with the AMD GPUs ' + ','.join(self.amd_gpus))
 
+        if self.events is None:
+            pass
+        elif self.events < 0:
+            desc.append('over all events')
+        else:
+            desc.append(f'over {self.events} events')
+
         return ', '.join(desc)
 
 
@@ -231,6 +275,12 @@ if __name__ == "__main__":
 
     else:
         slot = Slot()
+        command,environ = slot.get_execution_parameters()
+        print('Running', cmd, slot.describe())
+        print(slot.get_command_line_prefix() + cmd)
+        print()
+
+        slot = Slot(events = '-1')
         command,environ = slot.get_execution_parameters()
         print('Running', cmd, slot.describe())
         print(slot.get_command_line_prefix() + cmd)

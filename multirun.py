@@ -42,6 +42,20 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   if slot is None:
       slot = Slot()
 
+  # if the slot requires a custom number of events, create a copy of the input file and update it accordingly
+  if slot.events is not None:
+    # create a new configuration file
+    oldfilename = filename
+    filename = workdir + '/process.py'
+    with open(oldfilename, 'r') as oldfile, open(filename, 'w') as newfile:
+      # copy the original content to the new configuration file
+      oldfile.seek(0)
+      newfile.write(oldfile.read())
+      # update the number of events in the temporary file
+      newfile.write(f'\n# update the number of events to process\nprocess.maxEvents.input = cms.untracked.int32({slot.events})\n')
+      if slot.events > -1:
+        newfile.write(f'process.ThroughputService.eventRange = cms.untracked.uint32({slot.events})\n')
+
   # command to execute
   command = [ executable, filename ] + list(args)
   # shell environment
@@ -438,7 +452,6 @@ def multiCmsRun(
       print("wait")
       sys.stdout.flush()
     failed_jobs = [ False ] * jobs
-    consistent_events = defaultdict(int)
     for job, thread in enumerate(job_threads):
       # implicitly wait for the thread to complete
       result = thread.result.get()
@@ -455,7 +468,6 @@ def multiCmsRun(
       nt = tuple(t[i].timestamp() for i in range(len(e)) if e[i] >= skipevents)
       e = ne
       t = nt
-      consistent_events[e] += 1
       events[job] = np.array(e)
       times[job]  = np.array(t)
       fits[job]   = stats.linregress(times[job], events[job])
@@ -472,23 +484,6 @@ def multiCmsRun(
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
       shutil.rmtree(jobdir)
-
-    reference_events = np.array(sorted(consistent_events, key = consistent_events.get, reverse = True)[0])
-
-    # check for jobs with inconsistent events
-    inconsistent = False
-    for job in range(jobs):
-      if (len(events[job]) != len(reference_events)) or any(events[job] != reference_events):
-        print('Inconsistent measurement points for job %d' % job)
-        sys.stdout.flush()
-        inconsistent = True
-
-    # skip the results from inconsistent jobs
-    if inconsistent:
-      print('Inconsistent results detected, this measurement will be ignored')
-      sys.stdout.flush()
-      failed[repeat] = True
-      continue
 
     # find the overlapping ranges
     if jobs > 1:
@@ -508,7 +503,8 @@ def multiCmsRun(
           overlap_size[job] = e[-1] - e[0]
 
     # measure the average throughput
-    used_events = reference_events[-1] - reference_events[0]
+    min_events  = min(events[job][-1] - events[job][0] for job in range(jobs))
+    max_events  = max(events[job][-1] - events[job][0] for job in range(jobs))
     throughput  = sum(fit.slope for fit in fits)
     error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
     if overlap_fits is None:
@@ -526,10 +522,13 @@ def multiCmsRun(
         overlap = 0.
       if plumbing:
         # machine- or human-readable formatting
-        print(', %8.1f\t%8.1f\t%d\t%0.1f%%\t%8.1f\t%8.1f\t%d' % (throughput, error, used_events, overlap * 100., overlap_throughput, overlap_error, overlap_events))
+        print(', %8.1f\t%8.1f\t%d\t%d\t%0.1f%%\t%8.1f\t%8.1f\t%d' % (throughput, error, min_events, max_events, overlap * 100., overlap_throughput, overlap_error, overlap_events))
       else:
         # human-readable formatting
-        print('%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)' % (throughput, error, used_events, overlap * 100.), end='')
+        if min_events == max_events:
+            print('%8.1f \u00b1 %5.1f ev/s (%d events, %0.1f%% overlap)' % (throughput, error, min_events, overlap * 100.), end='')
+        else:
+            print('%8.1f \u00b1 %5.1f ev/s (%d-%d events, %0.1f%% overlap)' % (throughput, error, min_events, max_events, overlap * 100.), end='')
         if overlap_events > 0:
           print(', %8.1f \u00b1 %5.1f ev/s (\u2a7e %d events, overlap-only)' % (overlap_throughput, overlap_error, overlap_events))
         else:
@@ -537,12 +536,12 @@ def multiCmsRun(
     else:
       # with a single job the overlap does not make sense
       overlap = 1.
-      overlap_events = used_events
+      overlap_events = min_events
       overlap_throughput = throughput
       overlap_error = error
       # machine- or human-readable formatting
       formatting = '%8.1f\t%8.1f\t%d' if plumbing else '%8.1f \u00b1 %5.1f ev/s (%d events)'
-      print(formatting % (throughput, error, used_events))
+      print(formatting % (throughput, error, min_events))
     sys.stdout.flush()
 
     # store the values to compute the average throughput over the repetitions
@@ -554,7 +553,7 @@ def multiCmsRun(
 
     # store performance points for later analysis
     if data:
-      data.write('%d, %f, %d, %d, %d, %d, %f, %f, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, used_events, throughput, error, overlap_events, overlap_throughput, overlap_error))
+      data.write('%d, %f, %d, %d, %d, %d, %d, %f, %f, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, min_events, max_events, throughput, error, overlap_events, overlap_throughput, overlap_error))
 
     # do something with the monitoring data
     if thislogdir is not None:
