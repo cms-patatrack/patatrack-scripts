@@ -42,6 +42,20 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
   if slot is None:
       slot = Slot()
 
+  # if the slot requires a custom number of events, create a copy of the input file and update it accordingly
+  if slot.events is not None:
+    # create a new configuration file
+    oldfilename = filename
+    filename = workdir + '/process.py'
+    with open(oldfilename, 'r') as oldfile, open(filename, 'w') as newfile:
+      # copy the original content to the new configuration file
+      oldfile.seek(0)
+      newfile.write(oldfile.read())
+      # update the number of events in the temporary file
+      newfile.write(f'\n# update the number of events to process\nprocess.maxEvents.input = cms.untracked.int32({slot.events})\n')
+      if slot.events > -1:
+        newfile.write(f'process.ThroughputService.eventRange = cms.untracked.uint32({slot.events})\n')
+
   # command to execute
   command = [ executable, filename ] + list(args)
   # shell environment
