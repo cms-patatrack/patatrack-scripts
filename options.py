@@ -214,6 +214,17 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = ['resources.json'],
             help = 'list of additional output files to be kept in logdir, along with the logs [default: "resources.json"]')
 
+        group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('--auto-merge',
+            dest = 'automerge',
+            action = 'store_true',
+            default = True,
+            help = 'automatically merge supported file types, if the corresponding merger is available [default: True]')
+        group.add_argument('--no-auto-merge',
+            dest = 'automerge',
+            action = 'store_false',
+            help = 'do automatically merge supported file types, even if the corresponding merger is available')
+
         self.parser.add_argument('--tmpdir',
             dest = 'tmpdir',
             action = 'store',

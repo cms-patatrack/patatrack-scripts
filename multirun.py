@@ -36,6 +36,104 @@ from threaded import threaded
 cpus = get_cpu_info()
 gpus = get_gpu_info()
 
+# configure how to merge different files
+# 'inputs' can be
+#   - 'stdin'   to concatenate all inputs and pass them as standard input (NOT IMPLEMENTED), e.g.
+#                   cat in1 in2 in3 ... | command ...
+#
+#   - 'arg'     to pass all inputs as arguments, e.g.
+#                   command in1 in2 in3 ...
+#
+#   - 'option'  to pass all inputs as arguments after a single option, e.g.
+#                   command -i in1 in2 in3 ...
+#
+#   - 'multi'   to pass all inputs as arguments to individual options, e.g.
+#                   command -i in1 -i in2 -i in3 ...
+#
+# For 'option' and 'multi' the option is given in the "inputs_option" field.
+#
+# 'output' can be
+#   - 'stdout'  to write the combined output to the standard output of the command, e.g.
+#                   command ... > output
+#
+#   - 'arg'     to write the combined output to the (last) argument to the command, e.g.
+#                   command ... output
+#
+#   - 'option'  to write the combined output to the argument to the given option, e.g.
+#                   command ... -o output
+#
+# For 'option' the option is given in the "output_option" field.
+
+auto_merge_map = {
+  'resources.json': {
+    'cmd': 'mergeResourcesJson.py',
+    'args': [],
+    'inputs': 'args',
+    'inputs_options': None,
+    'output': 'stdout',
+    'output_options': None,
+  }
+}
+
+def runMergeCommand(tag, workdir, inputs, output, verbose):
+  if not tag in auto_merge_map:
+    return
+
+  entry = auto_merge_map[tag]
+  cmd = entry['cmd']
+  args = entry['args']
+  ins = entry['inputs']
+  out = entry['output']
+
+  exec = shutil.which(cmd)
+  if exec:
+    command = [ exec ]
+  else:
+    raise RuntimeError(f'cannot find command {cmd} .')
+
+  if args:
+    command.extend(args)
+
+  stdin = None
+  if ins == 'stdin':
+    # FIXME does it make sense to pass multiple inputs as stdin ?
+    raise NotImplementedError(f'auto merge command {tag} uses input through stdin, which is not supported')
+    sys.exit(1)
+  elif ins == 'args':
+    command.extend(inputs)
+  elif ins == 'option':
+    opt = entry['inputs_options']
+    command.append(opt)
+    command.extend(inputs)
+  elif ins == 'multi':
+    opt = entry['inputs_options']
+    for i in inputs:
+      command.extend((opt, i))
+  else:
+    raise NotImplementedError(f'auto merge command for {tag} uses an unknown input schema {ins}.')
+
+  stdout = None
+  if out == 'stdout':
+    stdout = open(output, 'w')
+  elif out == 'arg':
+    command.append(output)
+  elif out == 'option':
+    opt = entry['output_options']
+    command.append(opt)
+    command.append(output)
+  else:
+    raise NotImplementedError(f'auto merge command for {tag} uses an unknown output schema {out}.')
+
+  cmdline = ' '.join(command)
+  if verbose:
+    sys.stdout.write(cmdline + '\n')
+    sys.stdout.flush()
+  pipe = subprocess.run(command, stdin = stdin, stdout = stdout, stderr = subprocess.PIPE)
+  if stdout is not None:
+    stdout.close()
+  if pipe.returncode != 0:
+    raise RuntimeError(f'Exit code {pipe.returncode} while running "' + cmdline + '"\n\n' + pipe.stderr.decode(sys.stdout.encoding))
+
 
 @threaded
 def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, slot = None, *args):
@@ -236,6 +334,7 @@ def multiCmsRun(
     set_cpu_affinity = False,       # whether to set CPU affinity
     set_gpu_affinity = False,       # whether to set GPU affinity
     slots = [],                     # explit job execution environment
+    automerge = True,               # automatically merge supported output across all jobs
     executable = 'cmsRun',          # executable to run, usually cmsRun
     *args):                         # additional arguments passed to the executable
 
@@ -480,6 +579,14 @@ def multiCmsRun(
       failed[repeat] = True
       continue
 
+    # auto-merge supported outputs
+    if thislogdir and automerge:
+      for tag in keep:
+        if tag in auto_merge_map:
+          inputs = glob.glob(f'{thislogdir}/pid*/{tag}')
+          output = f'{thislogdir}/{tag}'
+          runMergeCommand(tag, workdir, inputs, output, verbose)
+
     # if all jobs were successful, delete the temporary directories
     for job in range(jobs):
       jobdir = os.path.join(workdir.name, "step%02d_part%02d" % (repeat, job))
@@ -563,6 +670,14 @@ def multiCmsRun(
       monit_file.write(repr(monit).replace('array', '\n  np.array'))
       monit_file.write("\n")
       monit_file.close()
+
+  # auto-merge supported outputs
+  if logdir and automerge:
+    for tag in keep:
+      if tag in auto_merge_map:
+        inputs = glob.glob(f'{logdir}/step*/{tag}')
+        output = f'{logdir}/{tag}'
+        runMergeCommand(tag, workdir, inputs, output, verbose)
 
   # compute the average throughput over the repetitions
   if repeats > 1 and not plumbing:
