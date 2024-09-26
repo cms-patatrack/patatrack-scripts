@@ -17,6 +17,7 @@ This options disables the automatic job assignment to CPUs and GPUs, and makes t
 Each '--slot' option describes the execution environment for a single job. If theare more jobs (see the --jobs option) than slots, they are reused in a round-robin fashion until all jobs are allocated.
 The format of SLOT is a colon-separated list of fields, where each field has the format 'keyword=value'.
 The possible fields, their formats and descriptions are:
+   [events|e]=EVENTS        where EVENTS is a positive integer, or -1 to run over all events in the input dataset, and overrides the --events options for this slot;
    [numa|n]=NODES           where NODES indicates the NUMA nodes of the CPUs to be used by the job;
    [mem|m]=NODES            where NODES indicates the NUMA nodes of the memory to be used by the job;
    [cpu|c]=CPUS             where CPUS indicates the individual CPUs to be used by the job;
