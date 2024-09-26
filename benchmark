@@ -39,6 +39,7 @@ if __name__ == "__main__":
     'logdir'              : opts.logdir if opts.logdir else None,
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
+    'automerge'           : opts.automerge,
   }
 
   # print a system overview
