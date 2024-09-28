@@ -136,7 +136,7 @@ def runMergeCommand(tag, workdir, inputs, output, verbose):
 
 
 @threaded
-def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep = [], verbose = False, slot = None, *args):
+def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, slot = None, executable = 'cmsRun', *args):
   if slot is None:
       slot = Slot()
 
@@ -190,6 +190,7 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
 
   # start the subprocess
   timestamp = datetime.now()
+  autostamp = timestamp
   buffer_data.append((timestamp, 0, 0, 0))  # time, vsize, rss, pss
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
   proc = psutil.Process(job.pid)
@@ -210,6 +211,14 @@ def singleCmsRun(filename, workdir, executable = 'cmsRun', logdir = None, keep =
         buffer_data.append((timestamp, mem.vms, mem.rss, mem.pss))  # time, vsize, rss, pss
     except psutil.NoSuchProcess:
       break
+    # if requested, autodelete the output
+    if autodelete:
+      stamp = datetime.now()
+      if (stamp - autostamp).total_seconds() > autodelete_delay:
+        for pattern in autodelete:
+          for f in glob.glob(pattern):
+            os.remove(f)
+        autostamp = stamp
 
   # flush the subprocess stdin, stdout and stderr
   job.communicate()
@@ -335,6 +344,8 @@ def multiCmsRun(
     set_gpu_affinity = False,       # whether to set GPU affinity
     slots = [],                     # explit job execution environment
     automerge = True,               # automatically merge supported output across all jobs
+    autodelete = [],                # automatically delete files matching the given patterns while running the jobs (default: do not autodelete)
+    autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     *args):                         # additional arguments passed to the executable
 
@@ -466,7 +477,17 @@ def multiCmsRun(
           os.makedirs(daqdir, exists_ok = True)
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
-      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = [], verbose = verbose, slot = slots[job], *args)
+      job_threads[job] = singleCmsRun(
+        config.name,
+        workdir = jobdir,
+        logdir = thislogdir,
+        keep = [],
+        autodelete = autodelete,
+        autodelete_delay = autodelete_delay,
+        verbose = verbose,
+        slot = slots[job],
+        executable = executable,
+        *args)
 
     # start all threads
     for thread in job_threads:
@@ -539,7 +560,17 @@ def multiCmsRun(
           os.makedirs(daqdir, exists_ok = True)
         else:
           os.makedirs(os.path.join(jobdir, daqdir))
-      job_threads[job] = singleCmsRun(config.name, jobdir, executable = executable, logdir = thislogdir, keep = keep, verbose = verbose, slot = slots[job], *args)
+      job_threads[job] = singleCmsRun(
+        config.name,
+        workdir = jobdir,
+        logdir = thislogdir,
+        keep = keep,
+        autodelete = autodelete,
+        autodelete_delay = autodelete_delay,
+        verbose = verbose,
+        slot = slots[job],
+        executable = executable,
+        *args)
 
     # start all threads
     for thread in job_threads:
