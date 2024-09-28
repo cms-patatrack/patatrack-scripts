@@ -246,3 +246,11 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             options.gpu_affinity = False
 
         return options
+
+
+if __name__ == "__main__":
+  import sys
+  parser = OptionParser()
+  opts = parser.parse(sys.argv[1:])
+  for key,val in opts.__dict__.items():
+    print(f'{key} = {val}')
