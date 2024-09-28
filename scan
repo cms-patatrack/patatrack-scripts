@@ -106,6 +106,8 @@ if __name__ == "__main__":
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
     'automerge'           : opts.automerge,
+    'autodelete'          : opts.autodelete,
+    'autodelete_delay'    : opts.autodelete_delay,
   }
 
   # print a system overview
