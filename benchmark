@@ -26,6 +26,7 @@ if __name__ == "__main__":
     'resolution'          : opts.event_resolution,
     'skipevents'          : opts.event_skip,
     'repeats'             : opts.repeats,
+    'wait'                : opts.wait,
     'jobs'                : opts.jobs,
     'threads'             : opts.threads,
     'streams'             : opts.streams,

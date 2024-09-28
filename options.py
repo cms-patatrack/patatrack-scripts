@@ -90,6 +90,13 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = 3,
             help = 'repeat each measurement N times [default: 3]')
 
+        self.parser.add_argument('--wait',
+            dest = 'wait',
+            action = 'store',
+            type = float,
+            default = 0.,
+            help = 'wait this many seconds between measurements [default: 0]')
+
         self.parser.add_argument('-t', '--threads',
             dest = 'threads',
             action = 'store',

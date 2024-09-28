@@ -334,6 +334,7 @@ def multiCmsRun(
     resolution = 100,               # sample the number of processed events with the given resolution (default: 100)
     skipevents = 300,               # skip the firts EVENTS in each job, rounded to the next multiple of the event resulution (default: 300)
     repeats = 1,                    # number of times to repeat each job (default: 1)
+    wait = 0.,                      # number of seconds to wait between repetitions (default: 0)
     jobs = 1,                       # number of jobs to run in parallel (default: 1)
     threads = 1,                    # number of CPU threads per job (default: 1)
     streams = 1,                    # number of EDM streams per job (default: 1)
@@ -536,6 +537,10 @@ def multiCmsRun(
 
   iterations = range(repeats) if repeats > 0 else itertools.count()
   for repeat in iterations:
+    # wait the given number of seconds between each repetition
+    if repeat > 0:
+      time.sleep(wait)
+
     # run the jobs reading the output to extract the event throughput
     events       = [ None ] * jobs
     times        = [ None ] * jobs
