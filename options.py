@@ -230,6 +230,19 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             action = 'store',
             default = None,
             help = 'path to temporary directory used at runtime [default: None, to use a system-dependent default temporary directory]')
+        self.parser.add_argument('--auto-delete',
+            dest = 'autodelete',
+            metavar = 'PATTERN',
+            nargs = '+',
+            default = [],
+            help = 'automatically delete files matching the given patterns while running the jobs [default: do not delete any files]')
+        self.parser.add_argument('--auto-delete-delay',
+            dest = 'autodelete_delay',
+            metavar = 'DELAY',
+            action = 'store',
+            type = float,
+            default = 60.,
+            help = 'check for files to autodelete with this interval [default: 60s]')
 
 
     def parse(self, args):
