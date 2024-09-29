@@ -211,12 +211,12 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
         buffer_data.append((timestamp, mem.vms, mem.rss, mem.pss))  # time, vsize, rss, pss
     except psutil.NoSuchProcess:
       break
-    # if requested, autodelete the output
+    # if requested, autodelete the files in the working directory
     if autodelete:
       stamp = datetime.now()
       if (stamp - autostamp).total_seconds() > autodelete_delay:
         for pattern in autodelete:
-          for f in glob.glob(pattern):
+          for f in glob.glob(workdir + '/' + pattern):
             os.remove(f)
         autostamp = stamp
 
