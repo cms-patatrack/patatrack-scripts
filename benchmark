@@ -37,6 +37,8 @@ if __name__ == "__main__":
     'set_gpu_affinity'    : opts.gpu_affinity,
     'slots'               : opts.slots,
     'executable'          : opts.executable,
+    'data'                : open(opts.csv, 'wt', buffering=1, encoding='utf-8') if opts.csv else None,
+    'header'              : opts.csvheader,
     'logdir'              : opts.logdir if opts.logdir else None,
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
@@ -80,9 +82,13 @@ if __name__ == "__main__":
 
     # benchmark reading the input data
     print('Benchmarking only I/O')
-    io_options = dict(options, logdir = None, keep = [])
+    io_options = dict(options, logdir = None, keep = [], data = None)
     multiCmsRun(io_process, **io_options)
     print()
 
   print('Benchmarking %s' % opts.config)
   multiCmsRun(process, **options)
+
+  # close the CSV file
+  if options['data']:
+    options['data'].close()

@@ -533,7 +533,7 @@ def multiCmsRun(
 
   # store performance points for later analysis
   if data and header:
-    data.write('%s, %s, %s, %s, %s, %s, %s, %s\n' % ('jobs', 'overlap', 'CPU threads per job', 'EDM streams per job', 'GPUs per jobs', 'number of events', 'average throughput (ev/s)', 'uncertainty (ev/s)'))
+    data.write('jobs, overlap, CPU threads per job, EDM streams per job, GPUs per job, jobs start timestamp, jobs stop timestamp, minimum number of events, maximum number of events, average throughput (ev/s), average uncertainty (ev/s), overlap start timestamp, overlap stop timestamp, overlap events, overlap throughput (ev/s), overlap uncertainty (ev/s)\n')
 
   iterations = range(repeats) if repeats > 0 else itertools.count()
   for repeat in iterations:
@@ -629,6 +629,8 @@ def multiCmsRun(
       shutil.rmtree(jobdir)
 
     # find the overlapping ranges
+    jobs_start = min(times[job][0] for job in range(jobs))
+    jobs_stop  = max(times[job][-1] for job in range(jobs))
     if jobs > 1:
       overlap_start = max(times[job][0] for job in range(jobs))
       overlap_stop  = min(times[job][-1] for job in range(jobs))
@@ -644,6 +646,11 @@ def multiCmsRun(
           t = times[job][start_index:stop_index]
           overlap_fits[job] = stats.linregress(t, e)
           overlap_size[job] = e[-1] - e[0]
+    else:
+      overlap_start = jobs_start
+      overlap_stop  = jobs_stop
+      overlap_fits  = fits
+      overlap_size  = [ events[0][-1] - events[0][0] ]
 
     # measure the average throughput
     min_events  = min(events[job][-1] - events[job][0] for job in range(jobs))
@@ -696,7 +703,7 @@ def multiCmsRun(
 
     # store performance points for later analysis
     if data:
-      data.write('%d, %f, %d, %d, %d, %d, %d, %f, %f, %d, %f, %f\n' % (jobs, overlap, threads, streams, gpus_per_job, min_events, max_events, throughput, error, overlap_events, overlap_throughput, overlap_error))
+      data.write(f'{jobs}, {overlap:0.4f}, {threads}, {streams}, {gpus_per_job}, {jobs_start:.3f}, {jobs_stop:.3f}, {min_events}, {max_events}, {throughput}, {error}, {overlap_start:.3f}, {overlap_stop:.3f}, {overlap_events}, {overlap_throughput}, {overlap_error}\n')
 
     # do something with the monitoring data
     if thislogdir is not None:

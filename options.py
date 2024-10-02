@@ -203,6 +203,23 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = [],
             help = 'ignores --numa-affinity, --cpu-affinity, --gpu-affinity, and define explicitly the execution environment for a job slot (see below)')
 
+        self.parser.add_argument('--csv',
+            dest = 'csv',
+            metavar = 'FILE',
+            action = 'store',
+            default = None,
+            help = 'write a summary of the measurements to a CSV file [default: None]')
+        group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('--csv-header',
+            dest = 'csvheader',
+            action = 'store_true',
+            default = True,
+            help = 'write a header at the top of the CSV file [default: True]')
+        group.add_argument('--no-csv-header',
+            dest = 'csvheader',
+            action = 'store_false',
+            help = 'do not write a header at the top of the CSV file [default: True]')
+
         group = self.parser.add_mutually_exclusive_group()
         group.add_argument('-l', '--logdir',
             dest = 'logdir',

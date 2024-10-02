@@ -10,6 +10,11 @@ from multirun import *
 def parseArguments():
   parser = OptionParser()
 
+  # Change the default to use a CSV file
+  csv = parser.parser._actions[[ action.dest for action in parser.parser._actions ].index('csv')]
+  csv.default = 'scan.csv'
+  csv.help = csv.help.replace('None', 'scan.csv')
+
   # Options specific to scan
   parser.parser.add_argument('--steps',
     type = int,
@@ -28,11 +33,6 @@ def parseArguments():
     type = int,
     default = None,
     help = 'maximum number of cores to scan. Use None to guess based on the number of available cores (or threads) and concurrent jobs [default: None]')
-
-  parser.parser.add_argument('--csv-data',
-    dest = 'csv_data',
-    default = 'scan.csv',
-    help = 'csv file to save the results into [default: scan.csv]')
 
   parser.parser.add_argument('--events-extra-per-thread',
     dest = 'events_extra_per_thread',
@@ -65,7 +65,7 @@ Selected Configuration:
 """.format(opts.config,
            steps,
            opts.run_io_benchmark,
-           opts.csv_data,
+           opts.csv,
            opts.logdir,
            opts.events_limit,
            opts.jobs,
@@ -103,6 +103,8 @@ if __name__ == "__main__":
     'set_gpu_affinity'    : opts.gpu_affinity,
     'slots'               : opts.slots,
     'executable'          : opts.executable,
+    'data'                : open(opts.csv, 'wt', buffering=1, encoding='utf-8') if opts.csv else None,
+    'header'              : opts.csvheader,
     'logdir'              : opts.logdir if opts.logdir else None,
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
@@ -144,10 +146,6 @@ if __name__ == "__main__":
 
   printJobInfo(opts, steps)
 
-  # save scan results to 'scan.csv'
-  options['data'] = open(opts.csv_data, 'w', 1)
-  options['header'] = True
-
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)
 
@@ -175,7 +173,7 @@ if __name__ == "__main__":
     # benchmark reading the input data
     if opts.run_io_benchmark:
       print('Benchmarking only I/O')
-      io_options = dict(step_opt, logdir = None, keep = [], data = None, header = False)
+      io_options = dict(step_opt, logdir = None, keep = [], data = None)
       multiCmsRun(io_process, **io_options)
       print()
 
@@ -188,3 +186,7 @@ if __name__ == "__main__":
 
     # print the CSV header only once
     step_opt['header'] = False
+
+  # close the CSV file
+  if options['data']:
+    options['data'].close()
