@@ -34,7 +34,8 @@ from slot import Slot
 from threaded import threaded
 
 cpus = get_cpu_info()
-gpus = get_gpu_info()
+gpus_nv  = get_gpu_info_nvidia()
+gpus_amd = get_gpu_info_amd()
 
 # configure how to merge different files
 # 'inputs' can be
@@ -398,8 +399,9 @@ def multiCmsRun(
     # try to build jb slots based on various heuristics
     numa_cpu_nodes = [ None ] * jobs
     numa_mem_nodes = [ None ] * jobs
-    gpu_assignment = [ None ] * jobs
     cpu_assignment = [ None ] * jobs
+    gpu_assignment_nvidia = [ None ] * jobs
+    gpu_assignment_amd    = [ None ] * jobs
 
     if set_numa_affinity:
       # FIXME - minimal implementation to test HBM vs DDR memory on Intel Xeon Pro systems
@@ -449,14 +451,14 @@ def multiCmsRun(
       #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
       #     run each job on all GPUs
       #   - otherwise, assign GPUs to jobs in a round-robin fashon
-      if gpus_per_job >= len(gpus):
-        gpu_assignment = [ ','.join(map(str, list(gpus.keys()))) for i in range(jobs) ]
+      if gpus_per_job >= len(gpus_nv):
+        gpu_assignment_nvidia = [ ','.join(map(str, list(gpus_nv.keys()))) for i in range(jobs) ]
       else:
-        gpu_repeated   = list(map(str, itertools.islice(itertools.cycle(list(gpus.keys())), jobs * gpus_per_job)))
-        gpu_assignment = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
+        gpu_repeated = list(map(str, itertools.islice(itertools.cycle(list(gpus_nv.keys())), jobs * gpus_per_job)))
+        gpu_assignment_nvidia = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
 
     # define the execution environments
-    slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment[job], amd_gpus = None) for job in range(jobs) ]
+    slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment_nvidia[job], amd_gpus = gpu_assignment_amd[job]) for job in range(jobs) ]
 
   if warmup:
     print('Warming up')
@@ -775,10 +777,22 @@ def info():
     print('  %d: %s (%d cores, %d threads)' % (cpu.socket, cpu.model, len(cpu.physical_processors), len(cpu.hardware_threads)))
   print()
 
-  print('%d visible NVIDIA GPUs:' % len(gpus))
-  for gpu in gpus.values():
-    print('  %d: %s' % (gpu.device, gpu.model))
+  if gpus_nv:
+    print('%d visible NVIDIA CUDA GPUs:' % len(gpus_nv))
+    for gpu in gpus_nv.values():
+      print('  %d: %s' % (gpu.device, gpu.model))
+  else:
+    print('No visible NVIDIA CUDA GPUs')
   print()
+
+  if gpus_amd:
+    print('%d visible AMD ROCm GPUs:' % len(gpus_amd))
+    for gpu in gpus_amd.values():
+      print('  %d: %s' % (gpu.device, gpu.model))
+  else:
+    print('No visible AMD ROCm GPUs')
+  print()
+
   sys.stdout.flush()
 
 
