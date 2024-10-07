@@ -149,6 +149,9 @@ if __name__ == "__main__":
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)
 
+  # do not wait before the first step
+  wait = False
+
   for step in steps:
     # update the options for each step
     step_opt['threads'] = options['threads'] if options['threads'] is not None else step
@@ -176,10 +179,19 @@ if __name__ == "__main__":
       io_options = dict(step_opt, logdir = None, keep = [], data = None)
       multiCmsRun(io_process, **io_options)
       print()
+      # schedule a wait after the I/O benchmark
+      if opts.wait > 0:
+        wait = True
+
+    # wait the required number of seconds afer the I/O benchmark and between each iteration
+    if wait:
+      time.sleep(opts.wait)
 
     # run
     multiCmsRun(process, **step_opt)
-
+    # schedule a wait between each iteration
+    if opts.wait > 0:
+      wait = True
     # if the input files do not depend on the job configuration, warm up only once
     if opts.events_extra_per_thread == 0:
         step_opt['warmup'] = False

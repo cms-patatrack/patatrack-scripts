@@ -539,8 +539,8 @@ def multiCmsRun(
 
   iterations = range(repeats) if repeats > 0 else itertools.count()
   for repeat in iterations:
-    # wait the given number of seconds between each repetition
-    if repeat > 0:
+    # wait the required number of seconds between the warmup and the measurements and between each repetition
+    if warmup or repeat > 0:
       time.sleep(wait)
 
     # run the jobs reading the output to extract the event throughput

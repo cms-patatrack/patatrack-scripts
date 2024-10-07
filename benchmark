@@ -85,6 +85,9 @@ if __name__ == "__main__":
     io_options = dict(options, logdir = None, keep = [], data = None)
     multiCmsRun(io_process, **io_options)
     print()
+    # wait the required number of seconds between the I/O benchmark and the actual measurement
+    if opts.wait > 0:
+      time.sleep(opts.wait)
 
   print('Benchmarking %s' % opts.config)
   multiCmsRun(process, **options)
