@@ -29,7 +29,7 @@ def get_gpu_info_amd(cache = True):
 
   devices = subprocess.Popen(['rocmComputeCapabilities', ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).communicate()[0]
   for line in devices.splitlines():
-    matches = re.match(r' *([0-9]+) +(gfx[0-9]+(:(sramecc|xnack)[+-])*) +(.*)', line)
+    matches = re.match(r' *([0-9]+) +(gfx[0-9a-f]+(:(sramecc|xnack)[+-])*) +(.*)', line)
     if matches:
       device = int(matches.group(1))
       model  = matches.group(5).strip()
