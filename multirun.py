@@ -80,6 +80,10 @@ def runMergeCommand(tag, workdir, inputs, output, verbose):
   if not tag in auto_merge_map:
     return
 
+  # do not run the merge command if there are no input files
+  if not inputs:
+    return
+
   entry = auto_merge_map[tag]
   cmd = entry['cmd']
   args = entry['args']
