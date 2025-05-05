@@ -74,7 +74,7 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             action = 'store',
             type = int,
             default = 300,
-            help = 'skip the firts EVENTS in each job, rounded to the next multiple of the event resulution')
+            help = 'skip the firts EVENTS in each job, rounded to the next multiple of the event resulution [default: 300]')
 
         self.parser.add_argument('-j', '--jobs',
             dest = 'jobs',
