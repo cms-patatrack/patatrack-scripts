@@ -233,10 +233,12 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             help = 'do not store log files (equivalent to "--logdir \'\'")')
 
         self.parser.add_argument('-k', '--keep',
-            dest = 'keep',
-            nargs = '+',
-            default = ['resources.json'],
-            help = 'list of additional output files to be kept in logdir, along with the logs [default: "resources.json"]')
+            dest='keep',
+            nargs='+',
+            default=['resources.json'],
+            metavar='FILE',
+            help= 'list of additional output files to be kept in logdir, along with the logs [default: "resources.json"]. For example, the argument "-k resources.json DQM.root --" keeps resources.json and DQM.root. Note: the dashes "--" avoid the parser to consume unintended arguments afterwards.'
+        )
 
         group = self.parser.add_mutually_exclusive_group()
         group.add_argument('--auto-merge',
