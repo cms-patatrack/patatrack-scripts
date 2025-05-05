@@ -288,6 +288,11 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
       continue
 
     matches = line_pattern.match(line)
+    # Warning if the number of events used is too low
+    if "Not enough events to measure the throughput" in line:
+      strippedLine = line.strip().replace('\n', '')
+      print(f"Warning: {strippedLine}")
+    
     # check for the end of the events list
     if not matches:
       break
