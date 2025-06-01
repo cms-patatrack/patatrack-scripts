@@ -13,7 +13,7 @@ def parseArguments():
   # Change the default to use a CSV file
   csv = parser.parser._actions[[ action.dest for action in parser.parser._actions ].index('csv')]
   csv.default = 'scan.csv'
-  csv.help = csv.help.replace('None', 'scan.csv')
+  csv.help = 'write a summary of the measurements to a CSV file [default: scan.csv]'
 
   # Options specific to scan
   parser.parser.add_argument('--steps',
