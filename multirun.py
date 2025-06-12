@@ -141,7 +141,7 @@ def runMergeCommand(tag, workdir, inputs, output, verbose):
 
 
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, slot = None, executable = 'cmsRun', *args):
+def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, slot = None, executable = 'cmsRun', environ = None, *args):
   if slot is None:
       slot = Slot()
 
@@ -162,20 +162,23 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
   # command to execute
   command = [ executable, filename ] + list(args)
   # shell environment
-  environment = os.environ.copy()
+  if environ:
+      environment = environ.copy()
+  else:
+      environment = os.environ.copy()
   # command line for the verbose option
   cmdline = ' '.join(command) + ' &'
 
   # optionally set NUMA affinity, CPU affinity, and GPU selection
-  prefix, environ = slot.get_execution_parameters()
+  slot_prefix, slot_env = slot.get_execution_parameters()
   # update the command to execute
-  if prefix:
-      command = prefix + command
+  if slot_prefix:
+      command = slot_prefix + command
   # update the shell environment for the command
-  if environ:
-      environment.update(environ)
+  if slot_env:
+      environment.update(slot_env)
   # update the command line for the verbose option
-  if prefix or environ:
+  if slot_prefix or slot_env:
       cmdline = slot.get_command_line_prefix() + cmdline
 
   if verbose:
@@ -358,6 +361,7 @@ def multiCmsRun(
     autodelete = [],                # automatically delete files matching the given patterns while running the jobs (default: do not autodelete)
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
     executable = 'cmsRun',          # executable to run, usually cmsRun
+    environ = None,                 # shell environment to use instead of os.environ
     *args):                         # additional arguments passed to the executable
 
   # set the number of streams and threads
@@ -499,6 +503,7 @@ def multiCmsRun(
         verbose = verbose,
         slot = slots[job],
         executable = executable,
+        environ = environ,
         *args)
 
     # start all threads
@@ -586,6 +591,7 @@ def multiCmsRun(
         verbose = verbose,
         slot = slots[job],
         executable = executable,
+        environ = environ,
         *args)
 
     # start all threads
