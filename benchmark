@@ -3,6 +3,7 @@
 import sys
 import os
 import copy
+import subprocess
 
 from options import OptionParser
 from multirun import *
@@ -88,6 +89,49 @@ if __name__ == "__main__":
     # wait the required number of seconds between the I/O benchmark and the actual measurement
     if opts.wait > 0:
       time.sleep(opts.wait)
+
+  if opts.reference_benchmark:
+    # benchmark the same configuration using the reference CMSSW release
+    if 'CMSSW_RELEASE_BASE' in os.environ:
+      # query scram for the reference release environment
+      release_base = os.environ['CMSSW_RELEASE_BASE']
+      variables = subprocess.Popen(['scram', 'runtime', '-sh'], cwd=release_base, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).communicate()[0].splitlines()
+      # make a copy of the environment and update it
+      environ = copy.deepcopy(os.environ)
+      export = re.compile(r'export +(\w+)="(.*)";?')
+      unset = re.compile(r'unset +((\w| )+);?')
+      for line in variables:
+        # set or update environment variables
+        matches = export.match(line)
+        if matches:
+          name = matches[1]
+          value = matches[2]
+          environ[name] = value
+        # unset environment variables
+        matches = unset.match(line)
+        if matches:
+          names = matches[1].split()
+          for name in names:
+            if name in environ:
+              del environ[name]
+      # run the benchmark with the modified environment
+      print('Benchmarking %s with the reference release at %s' % (opts.config, release_base))
+      if opts.logdir:
+          ref_logdir = opts.logdir + '_reference'
+      else:
+          ref_logdir = None
+      if opts.csv:
+          name, ext = os.path.splitext(opts.csv)
+          ref_csv = name + '_reference' + ext
+          ref_data = open(ref_csv, 'wt', buffering=1, encoding='utf-8')
+      else:
+          ref_data = None
+      ref_options = dict(options, logdir = ref_logdir, data = ref_data, environ = environ)
+      multiCmsRun(process, **ref_options)
+      print()
+    else:
+      print('$CMSSW_RELEASE_BASE is not set, cannot benchmark the reference release')
+    print()
 
   print('Benchmarking %s' % opts.config)
   multiCmsRun(process, **options)

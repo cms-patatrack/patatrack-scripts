@@ -130,6 +130,17 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             help = 'skip the I/O measurement')
 
         group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('-R', '--reference-benchmark',
+            dest = 'reference_benchmark',
+            action= 'store_true',
+            default = False,
+            help = 'benchmark the same configuration using the reference CMSSW release [default: False]')
+        group.add_argument('--no-reference-benchmark',
+            dest = 'reference_benchmark',
+            action= 'store_false',
+            help = 'do not benchmark the reference release')
+
+        group = self.parser.add_mutually_exclusive_group()
         group.add_argument('--warmup',
             dest = 'warmup',
             action = 'store_true',
