@@ -5,7 +5,6 @@ function header() {
   free -w | head -1 | sed -e's/^ *//' -e's/ \+/, /g'
 }
 
-
 function measure_one() {
   printf "%.3f, " $(date +%s.%N)
   free -w | sed -n -e'/^Mem:/s/ \+/, /g' -e's/^Mem:, //p'
