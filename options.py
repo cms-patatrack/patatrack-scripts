@@ -214,12 +214,19 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = [],
             help = 'ignores --numa-affinity, --cpu-affinity, --gpu-affinity, and define explicitly the execution environment for a job slot (see below)')
 
-        self.parser.add_argument('--csv',
+        group = self.parser.add_mutually_exclusive_group()
+        group.parser.add_argument('--csv',
             dest = 'csv',
             metavar = 'FILE',
             action = 'store',
             default = None,
-            help = 'write a summary of the measurements to a CSV file [default: None]')
+            help = 'write a summary of the measurements to a CSV file [default: logs/benchmark.csv if logs are enabled, otherwise no CSV file]')
+        group.parser.add_argument('--no-csv',
+            dest = 'csv',
+            action = 'store_const',
+            const = '',
+            help = 'do not write a CSV summary (equivalent to "--csv \'\'")')
+
         group = self.parser.add_mutually_exclusive_group()
         group.add_argument('--csv-header',
             dest = 'csvheader',
@@ -294,6 +301,14 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             options.numa_affinity = False
             options.cpu_affinity = False
             options.gpu_affinity = False
+
+        # if a logdir has been specified, and the CSV summary has not been explicitly disabled, enable it
+        if options.csv is None:
+            if options.logdir:
+                os.makedirs(options.logdir, exist_ok = True)
+                options.csv = options.logdir + '/benchmark.csv'
+            else:
+                options.csv = ''
 
         return options
 
