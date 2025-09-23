@@ -36,7 +36,7 @@ class Slot:
     # [mem|m]=NODES           where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the memory to be used by the job
     slot_format_mem = '(mem|m)=' + nodes_format
     # [cpu|c]=CPUS            where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
-    slot_format_cpu = '(cpus|c)=' + nodes_format
+    slot_format_cpu = '(cpus?|c)=' + nodes_format
     # [gpu-nvidia|nv]=GPUS    where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the NVIDIA GPUs to be used by the job
     slot_format_gpu_nvidia = '(gpu-nvidia|nv)=(' + gpus_format + ')?'
     # [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
