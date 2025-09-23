@@ -661,8 +661,12 @@ def multiCmsRun(
           stop_index  = times[job].searchsorted(overlap_stop, 'right')
           e = events[job][start_index:stop_index]
           t = times[job][start_index:stop_index]
-          overlap_fits[job] = stats.linregress(t, e)
-          overlap_size[job] = e[-1] - e[0]
+          try:
+              overlap_fits[job] = stats.linregress(t, e)
+              overlap_size[job] = e[-1] - e[0]
+          except:
+              overlap_fits[job] = None
+              overlap_size[job] = None
     else:
       overlap_start = jobs_start
       overlap_stop  = jobs_stop
@@ -673,15 +677,20 @@ def multiCmsRun(
     min_events  = min(events[job][-1] - events[job][0] for job in range(jobs))
     max_events  = max(events[job][-1] - events[job][0] for job in range(jobs))
     throughput  = sum(fit.slope for fit in fits)
-    error       = math.sqrt(sum(fit.stderr * fit.stderr for fit in fits))
+    error       = math.sqrt(sum(fit.stderr ** 2 for fit in fits))
     if overlap_fits is None:
         overlap_events     = 0
         overlap_throughput = 0
         overlap_error      = 0
     else:
-        overlap_events     = min(overlap_size)
-        overlap_throughput = sum(fit.slope for fit in overlap_fits)
-        overlap_error      = math.sqrt(sum(fit.stderr * fit.stderr for fit in overlap_fits))
+        try:
+            overlap_events     = min(overlap_size[job] for job in range(jobs) if overlap_size[job] is not None)
+            overlap_throughput = sum(overlap_fits[job].slope for job in range(jobs) if overlap_size[job] is not None)
+            overlap_error      = math.sqrt(sum(overlap_fits[job].stderr ** 2 for job in range(jobs) if overlap_size[job] is not None))
+        except:
+            overlap_events     = 0
+            overlap_throughput = 0
+            overlap_error      = 0
     if jobs > 1:
       # if running more than on job in parallel, estimate and print the overlap among them
       overlap = (min(t[-1] for t in times) - max(t[0] for t in times)) / sum(t[-1] - t[0] for t in times) * len(times)
@@ -746,24 +755,30 @@ def multiCmsRun(
     overlaps            = [ overlaps[i]    for i in range(repeats) if not failed[i] ]
     overlap_throughputs = [ overlap_throughputs[i] for i in range(repeats) if not failed[i] ]
     overlap_ranges      = [ overlap_ranges[i] for i in range(repeats) if not failed[i] ]
-    # filter out the jobs with an overlap lower than 90%
-    values              = [ throughputs[i] for i in range(len(throughputs)) if overlaps[i] >= 0.90 ]
-    n = len(values)
-    if n > 1:
-      value = np.average(values)
-      error = np.std(values, ddof=1)
-    elif n > 0:
-      # only a single valid job with an overlap > 90%, use its result
-      value = values[0]
+    if len(throughputs) == 0:
+      # all jobs failed
+      values = []
+      n = 0
+      value = float('nan')
       error = float('nan')
+      overlap_range = 0
+      overlap_value = float('nan')
+      overlap_error = float('nan')
     else:
-      # no valid jobs with an overlap > 90%, use the "best" one
-      value = throughputs[overlaps.index(max(overlaps))]
-      error = float('nan')
-    # overlap-only values
-    overlap_value = np.average(overlap_throughputs)
-    overlap_error = np.std(overlap_throughputs, ddof=1)
-    overlap_range = min(overlap_ranges)
+      # filter out the jobs with an overlap lower than 90%
+      values = [ throughputs[i] for i in range(len(throughputs)) if overlaps[i] >= 0.90 ]
+      n = len(values)
+      if n > 1:
+        value = np.average(values)
+        error = np.std(values, ddof=1)
+      else:
+        # at most one valid with an overlap > 90%, use the "best" one
+        value = throughputs[overlaps.index(max(overlaps))]
+        error = float('nan')
+      # overlap-only values
+      overlap_value = np.average(overlap_throughputs)
+      overlap_error = np.std(overlap_throughputs, ddof=1)
+      overlap_range = min(overlap_ranges)
     # print the summary
     print(' --------------------')
     if n == repeats:
