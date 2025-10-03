@@ -11,6 +11,7 @@ python3 patatrack-scipts/plot.py scan/reduced_hlt_{ecal,hcal,pixel}_w7900.csv --
 
 import pandas as pd
 import matplotlib.pyplot as plt
+plt.style.use('tableau-colorblind10')
 from matplotlib.ticker import MultipleLocator
 import sys
 import os
@@ -72,8 +73,10 @@ for file in csv_files:
 fig, ax = plt.subplots(figsize=(10, 6))
 for label, df in datasets.items():
     #df["std"] = df["std"].fillna(0)  # In case some groups have a single entry
+    color = ax.plot(df["CPU threads per job"], df["mean"], '--', linewidth=1.5)[0].get_color()
     ax.errorbar(df["CPU threads per job"], df["mean"], yerr=df["std"],
-                label=label, marker='o', capsize=5, ecolor='black')
+                label=label, marker='o', markersize=8, capsize=5, capthick=2,
+                ls='none', color=color)
 
 ax.set_xlabel("CPU threads per job")
 ax.set_ylabel("Average throughput (ev/s)")
