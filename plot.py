@@ -25,6 +25,8 @@ parser.add_argument('-t', '--title', type=str, default="",
                     help="Title of the legend")
 parser.add_argument('-o', '--output', type=str, default="throughput_vs_threads",
                     help="Base filename for output files (PNG/PDF)")
+parser.add_argument('-x', '--x-axis', default='CPU threads per job',
+                    help='Horizontal axis label.')
 parser.add_argument('--csv_labels', nargs='+', default=None, required=False,
                     help="CSV labels to process (one-to-one mapping with the CSV files)")
 
@@ -78,7 +80,7 @@ for label, df in datasets.items():
                 label=label, marker='o', markersize=8, capsize=5, capthick=2,
                 ls='none', color=color)
 
-ax.set_xlabel("CPU threads per job")
+ax.set_xlabel(args.x_axis)
 ax.set_ylabel("Average throughput (ev/s)")
 ax.set_title("Average throughput vs number of CPU threads per job")
 if title:
