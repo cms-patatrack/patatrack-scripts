@@ -1,5 +1,14 @@
 #! /usr/bin/env python3
 
+"""
+Plot average throughput vs number of CPU threads per job.
+
+Command examples:
+
++ Read 3 csv files and store OUTPUT.pdf and OUTPUT.png:
+python3 patatrack-scipts/plot.py scan/reduced_hlt_{ecal,hcal,pixel}_w7900.csv --title Labels --csv_labels ECAL HCAL Pixel -o OUTPUT
+"""
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -8,14 +17,15 @@ import os
 import argparse
 
 # Create the parser
-parser = argparse.ArgumentParser(description="Plot average throughput vs number of CPU threads per job")
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
 # Optional arguments
 parser.add_argument('-t', '--title', type=str, default="",
                     help="Title of the legend")
 parser.add_argument('-o', '--output', type=str, default="throughput_vs_threads",
                     help="Base filename for output files (PNG/PDF)")
-parser.add_argument('--csv_labels', nargs='+', default=None, required=False, help="CSV labels to process (one-to-one mapping with the CSV files)")
+parser.add_argument('--csv_labels', nargs='+', default=None, required=False,
+                    help="CSV labels to process (one-to-one mapping with the CSV files)")
 
 # Positional arguments (CSV files)
 parser.add_argument('csv_files', nargs='+', help="CSV files to process")
