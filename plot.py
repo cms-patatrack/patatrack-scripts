@@ -85,10 +85,11 @@ if title:
   ax.legend(title=title, title_fontsize='13', fontsize='11')
 else:
   ax.legend()
-ax.grid(True, axis='x')
+
+transparency = dict(alpha=0.7)
+ax.grid(True, axis='x', **transparency)
 ax.xaxis.set_major_locator(MultipleLocator(4))
-ax.grid(True, which='major', axis='x')
-ax.grid(True, which='major', axis='y')
+ax.grid(True, which='major', axis='both', **transparency)
 ax.set_ylim(bottom=0)
 
 # Make the axes (plot area) white
