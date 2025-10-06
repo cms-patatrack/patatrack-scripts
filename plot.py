@@ -42,7 +42,7 @@ filename = args.output
 files = args.files
 labels = args.labels
 if labels is not None:
-    assert len(files) == len(labels)
+    assert len(files) == len(labels), "The number of labels must match the number of input CSV files. Each label corresponds to one file, following the order they are provided."
 
 # Dictionary to store per-file datasets
 datasets = {}
