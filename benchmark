@@ -5,7 +5,7 @@ import os
 import copy
 import subprocess
 
-from options import OptionParser
+from options import OptionParser, printCommonArgs
 from multirun import *
 from slot import Slot
 import FWCore.ParameterSet.Config as cms
@@ -72,6 +72,10 @@ if __name__ == "__main__":
 
   process = parseProcess(opts.config)
 
+  # print configuration
+  if opts.verbose:
+    printCommonArgs(options)
+    
   if opts.run_io_benchmark:
     # prepare a trimmed down configuration for benchmarking only reading the input data
     io_process = copy.deepcopy(process)

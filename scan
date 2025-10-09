@@ -173,6 +173,10 @@ if __name__ == "__main__":
         if step_opt['events'] > opts.events_limit:
             step_opt['events'] = opts.events_limit
 
+    # print configuration
+    if opts.verbose:
+      printCommonArgs(step_opt)
+      
     # benchmark reading the input data
     if opts.run_io_benchmark:
       print('Benchmarking only I/O')

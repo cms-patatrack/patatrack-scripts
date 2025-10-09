@@ -1,5 +1,18 @@
+import sys
 import argparse
 from slot import Slot
+
+def printCommonArgs(opts):
+    print('Common options for multiCmsRun:')
+    for key, value in opts.items():
+        if key == 'slots':
+            print(f'  --{key}')
+            for idx, val in enumerate(value):
+                print(f'      slot {idx}: ' + ', '.join([f'{k}={v}' for x in value for k,v in vars(x).items()]))
+        else:
+            print(f'  --{key}: {value}')
+    print()
+    sys.stdout.flush()
 
 class OptionParser:
 
