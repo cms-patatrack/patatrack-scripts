@@ -67,7 +67,7 @@ if __name__ == "__main__":
     options['jobs'] = count // options['threads']
 
   # the number of streams defaults to the number of threads per job
-  if options['streams'] is None:
+  if options['streams'] is None or options['streams'] == 0:
     options['streams'] = options['threads']
 
   process = parseProcess(opts.config)

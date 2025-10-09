@@ -155,7 +155,7 @@ if __name__ == "__main__":
   for step in steps:
     # update the options for each step
     step_opt['threads'] = options['threads'] if options['threads'] is not None else step
-    step_opt['streams'] = options['streams'] if options['streams'] is not None else step
+    step_opt['streams'] = options['streams'] if options['streams'] is not None and options['streams'] != 0 else step
     step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
 
     # if the logs are enabled, use a separate directory for each step
