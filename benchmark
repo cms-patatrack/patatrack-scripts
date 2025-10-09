@@ -72,6 +72,14 @@ if __name__ == "__main__":
 
   process = parseProcess(opts.config)
 
+  # print configuration
+  if opts.verbose:
+    print('Common options for multiCmsRun:')
+    for key, value in options.items():
+      print(f'  --{key}: {value}')
+    sys.stdout.flush()
+    print()
+    
   if opts.run_io_benchmark:
     # prepare a trimmed down configuration for benchmarking only reading the input data
     io_process = copy.deepcopy(process)

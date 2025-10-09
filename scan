@@ -173,6 +173,14 @@ if __name__ == "__main__":
         if step_opt['events'] > opts.events_limit:
             step_opt['events'] = opts.events_limit
 
+    # print configuration
+    if opts.verbose:
+      print('Common step options for multiCmsRun:')
+      for key, value in step_opt.items():
+        print(f'  --{key}: {value}')
+      sys.stdout.flush()
+      print()
+
     # benchmark reading the input data
     if opts.run_io_benchmark:
       print('Benchmarking only I/O')
