@@ -5,7 +5,7 @@ import os
 import copy
 import subprocess
 
-from options import OptionParser
+from options import OptionParser, printCommonArgs
 from multirun import *
 from slot import Slot
 import FWCore.ParameterSet.Config as cms
@@ -74,11 +74,7 @@ if __name__ == "__main__":
 
   # print configuration
   if opts.verbose:
-    print('Common options for multiCmsRun:')
-    for key, value in options.items():
-      print(f'  --{key}: {value}')
-    sys.stdout.flush()
-    print()
+    printCommonArgs(options)
     
   if opts.run_io_benchmark:
     # prepare a trimmed down configuration for benchmarking only reading the input data

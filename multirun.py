@@ -356,7 +356,7 @@ def multiCmsRun(
     set_numa_affinity = False,      # FIXME - run each job in a single NUMA node
     set_cpu_affinity = False,       # whether to set CPU affinity
     set_gpu_affinity = False,       # whether to set GPU affinity
-    slots = [],                     # explit job execution environment
+    slots = [],                     # explicit job execution environment
     automerge = True,               # automatically merge supported output across all jobs
     autodelete = [],                # automatically delete files matching the given patterns while running the jobs (default: do not autodelete)
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
