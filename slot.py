@@ -140,7 +140,9 @@ class Slot:
         self.nvidia_gpus = Slot.parse_gpu_descriptor(nvidia_gpus)
         self.amd_gpus = Slot.parse_gpu_descriptor(amd_gpus)
 
-
+    def __str__(self):
+        return ', '.join([f'{k}={v}' for k,v in vars(self).items() if v is not None])
+    
     # return "value" if "field=value" is given in arg, or None if field is not in arg
     @staticmethod
     def parse_field(arg, field):

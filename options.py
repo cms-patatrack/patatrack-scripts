@@ -8,7 +8,7 @@ def printCommonArgs(opts):
         if key == 'slots':
             print(f'  --{key}')
             for idx, val in enumerate(value):
-                print(f'      slot {idx}: ' + ', '.join([f'{k}={v}' for x in value for k,v in vars(x).items()]))
+                print(f'      slot {idx}: {val}')
         else:
             print(f'  --{key}: {value}')
     print()
