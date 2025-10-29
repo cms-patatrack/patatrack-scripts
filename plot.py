@@ -11,7 +11,6 @@ python3 patatrack-scipts/plot.py scan/reduced_hlt_{ecal,hcal,pixel}_w7900.csv --
 
 import pandas as pd
 import matplotlib.pyplot as plt
-plt.style.use('tableau-colorblind10')
 from matplotlib.ticker import MultipleLocator
 import sys
 import os
