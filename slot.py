@@ -36,7 +36,7 @@ class Slot:
     # [mem|m]=NODES           where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the memory to be used by the job
     slot_format_mem = '(mem|m)=' + nodes_format
     # [cpu|c]=CPUS            where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
-    slot_format_cpu = '(cpus?|c)=' + nodes_format
+    slot_format_cpu = '(cpus|cpu|c)=' + nodes_format
     # [gpu-nvidia|nv]=GPUS    where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the NVIDIA GPUs to be used by the job
     slot_format_gpu_nvidia = '(gpu-nvidia|nv)=(' + gpus_format + ')?'
     # [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
@@ -164,7 +164,7 @@ class Slot:
         #   [events|e]=EVENTS       where EVENTS is a positive integer, or -1 to run over all events in the input dataset, and overrides the --events options for this slot
         #   [numa|n]=NODES          where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the CPUs to be used by the job
         #   [mem|m]=NODES           where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the memory to be used by the job
-        #   [cpu|c]=CPUS            where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
+        #   [cpus|cpu|c]=CPUS       where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
         #   [gpu-nvidia|nv]=GPUS    where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the NVIDIA GPUs to be used by the job
         #   [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
         if not isinstance(arg, str):
@@ -176,7 +176,7 @@ class Slot:
         events = Slot.parse_field(arg, ('events', 'e'))
         numa_cpu = Slot.parse_field(arg, ('numa', 'n'))
         numa_mem = Slot.parse_field(arg, ('mem', 'm'))
-        cpus = Slot.parse_field(arg, ('cpu', 'c'))
+        cpus = Slot.parse_field(arg, ('cpus', 'cpu', 'c'))
         nvidia_gpus = Slot.parse_field(arg, ('gpu-nvidia', 'nv'))
         amd_gpus = Slot.parse_field(arg, ('gpu-amd', 'amd'))
 
