@@ -18,6 +18,12 @@ import os
 import argparse
 
 def make_unique_label(new_label, label_list):
+    """
+    Given a label `new_label` and a given list of labels `label_list`, create a new label which is unique.
+    If `new_label` is present in `label_list`, then an index is added to the original label.
+    The index is iteratively incremented, until the new label differs from any label present in `label_list`.
+    If `new_label` is not present in `label_list`, then this function does nothing.
+    """
     if new_label not in label_list:
         return new_label
 
