@@ -9,6 +9,7 @@ Command examples:
 python3 patatrack-scipts/plot.py scan/reduced_hlt_{ecal,hcal,pixel}_w7900.csv --title Labels --labels ECAL HCAL Pixel -o OUTPUT
 """
 
+import re
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -16,6 +17,29 @@ import sys
 import os
 import argparse
 
+def make_unique_label(new_label, label_list):
+    if new_label not in label_list:
+        return new_label
+
+    pattern = re.compile(rf"^{re.escape(new_label)}(\d+)?$")
+    existing_indices = []
+
+    for label in label_list:
+        match = pattern.match(label)
+        if match:
+            # Extract the index if it exists
+            suffix = match.group(1)
+            if suffix:
+                index = int(suffix)
+                existing_indices.append(index)
+
+    # Find the next available index (starting from 2)
+    next_index = 2
+    while next_index in existing_indices:
+        next_index += 1
+
+    return f"{new_label}{next_index}"
+    
 # Create the parser
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
@@ -66,8 +90,7 @@ for file in files:
     label = os.path.basename(file) if labels is None else labels[files.index(file)]
     if label.endswith(".csv"):
         label = label[:-4]
-    label = label.replace("_", " ")
-    
+    label = make_unique_label(label.replace("_", " "), datasets.keys())
     datasets[label] = grouped
 
 # Plotting
