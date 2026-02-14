@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 
+import os
 import sys
 import subprocess
 import re
@@ -50,6 +51,8 @@ def get_cpu_info(cache = True):
       model = line.split(':')[1].strip()
       break
 
+  affinity = os.sched_getaffinity(0)
+
   devices = subprocess.Popen(['lscpu', '-b', '-p=SOCKET,NODE,CORE,CPU'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).communicate()[0]
   for line in devices.splitlines():
     if '#' in line:
@@ -60,6 +63,8 @@ def get_cpu_info(cache = True):
     numa = int(numa) if numa else sock
     core = int(core) if core else 0
     proc = int(proc) if proc else 0
+    if not proc in affinity:
+      continue
 
     if not sock in cpus:
       cpus[sock] = CPUInfo(sock, model)
