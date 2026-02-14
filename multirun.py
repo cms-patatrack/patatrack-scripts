@@ -22,6 +22,16 @@ import numpy as np
 from scipy import stats
 warnings.filterwarnings("default", category=UserWarning)
 
+# profile this script
+profile_self = False
+if profile_self:
+  try:
+    import yappi
+    yappi.set_clock_type("cpu")
+  except:
+    print("The yappi package is not present, self-profiling will be disabled.")
+    profile_self = False
+
 # check that CMSSW_BASE is set
 if not 'CMSSW_BASE' in os.environ:
     raise RuntimeError('Please load the CMSSW environment with "cmsenv"')
@@ -594,6 +604,10 @@ def multiCmsRun(
         environ = environ,
         *args)
 
+    # start profiling the benchmark script itself
+    if profile_self:
+      yappi.start()
+
     # start all threads
     for thread in job_threads:
       thread.start()
@@ -624,6 +638,10 @@ def multiCmsRun(
       times[job]  = np.array(t)
       fits[job]   = stats.linregress(times[job], events[job])
       monit[job]  = m
+
+    # stop profiling
+    if profile_self:
+      yappi.stop()
 
     # if any jobs failed, skip the whole measurement
     if any(failed_jobs):
@@ -739,6 +757,15 @@ def multiCmsRun(
       monit_file.write(repr(monit).replace('array', '\n  np.array'))
       monit_file.write("\n")
       monit_file.close()
+
+    # print the profiling information about the benchmark script itself
+    if profile_self:
+      yappi.get_func_stats().print_all(columns={
+        0:("name", 80),
+        1:("ncall", 8),
+        2:("tsub", 8),
+        3:("ttot", 8),
+        4:("tavg",8)})
 
   # auto-merge supported outputs
   if logdir and automerge:
