@@ -46,6 +46,7 @@ if __name__ == "__main__":
     'automerge'           : opts.automerge,
     'autodelete'          : opts.autodelete,
     'autodelete_delay'    : opts.autodelete_delay,
+    'debug_cpu_usage'     : opts.debug_cpu_usage,
   }
 
   # print a system overview

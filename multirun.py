@@ -22,15 +22,12 @@ import numpy as np
 from scipy import stats
 warnings.filterwarnings("default", category=UserWarning)
 
-# profile this script
-profile_self = False
-if profile_self:
-  try:
+# yappi is an optional dependency, used to profile this script itself
+try:
     import yappi
     yappi.set_clock_type("cpu")
-  except:
-    print("The yappi package is not present, self-profiling will be disabled.")
-    profile_self = False
+except:
+    pass
 
 # check that CMSSW_BASE is set
 if not 'CMSSW_BASE' in os.environ:
@@ -370,6 +367,7 @@ def multiCmsRun(
     automerge = True,               # automatically merge supported output across all jobs
     autodelete = [],                # automatically delete files matching the given patterns while running the jobs (default: do not autodelete)
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
+    debug_cpu_usage = False,        # profile the CPU usage of this script itself (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
     *args):                         # additional arguments passed to the executable
@@ -605,7 +603,7 @@ def multiCmsRun(
         *args)
 
     # start profiling the benchmark script itself
-    if profile_self:
+    if debug_cpu_usage:
       yappi.start()
 
     # start all threads
@@ -640,7 +638,7 @@ def multiCmsRun(
       monit[job]  = m
 
     # stop profiling
-    if profile_self:
+    if debug_cpu_usage:
       yappi.stop()
 
     # if any jobs failed, skip the whole measurement
@@ -759,7 +757,7 @@ def multiCmsRun(
       monit_file.close()
 
     # print the profiling information about the benchmark script itself
-    if profile_self:
+    if debug_cpu_usage:
       yappi.get_func_stats().print_all(columns={
         0:("name", 80),
         1:("ncall", 8),

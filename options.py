@@ -294,6 +294,13 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = 60.,
             help = 'check for files to autodelete with this interval [default: 60s]')
 
+        group = self.parser.add_argument_group('debug options')
+        group.add_argument('--debug-cpu-usage',
+            dest = 'debug_cpu_usage',
+            action = 'store_true',
+            default = False,
+            help = 'Profile the CPU usage of this script itself [default: False]. Requires the "yappi" module to be installed.')
+
 
     def parse(self, args):
         # parse the command line options
@@ -307,6 +314,15 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             options.numa_affinity = False
             options.cpu_affinity = False
             options.gpu_affinity = False
+
+        # check if profiling is supported
+        if options.debug_cpu_usage:
+          try:
+            import yappi
+            yappi.set_clock_type("cpu")
+          except:
+            print("The yappi package is not present, CPU usage profiling will be disabled.")
+            options.debug_cpu_usage = False
 
         return options
 
