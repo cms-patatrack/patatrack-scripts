@@ -368,6 +368,7 @@ def multiCmsRun(
     autodelete = [],                # automatically delete files matching the given patterns while running the jobs (default: do not autodelete)
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
     debug_cpu_usage = False,        # profile the CPU usage of this script itself (default: False)
+    debug_affinity= False,          # print the jobs CPU and GPU affiniy and constraints (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
     *args):                         # additional arguments passed to the executable
@@ -480,6 +481,11 @@ def multiCmsRun(
 
     # define the execution environments
     slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment_nvidia[job], amd_gpus = gpu_assignment_amd[job]) for job in range(jobs) ]
+
+  if debug_affinity:
+    for job,slot in enumerate(slots):
+      print(f"  - job {job} will run", slot.describe())
+    print()
 
   if warmup:
     print('Warming up')

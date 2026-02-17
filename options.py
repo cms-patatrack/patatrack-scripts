@@ -295,6 +295,11 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             help = 'check for files to autodelete with this interval [default: 60s]')
 
         group = self.parser.add_argument_group('debug options')
+        group.add_argument('--debug-affinity',
+            dest = 'debug_affinity',
+            action = 'store_true',
+            default = False,
+            help = 'Print the jobs CPU and GPU affiniy and constraints [default: False].')
         group.add_argument('--debug-cpu-usage',
             dest = 'debug_cpu_usage',
             action = 'store_true',
