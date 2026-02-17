@@ -47,6 +47,7 @@ if __name__ == "__main__":
     'autodelete'          : opts.autodelete,
     'autodelete_delay'    : opts.autodelete_delay,
     'debug_cpu_usage'     : opts.debug_cpu_usage,
+    'debug_affinity'      : opts.debug_affinity,
   }
 
   # print a system overview

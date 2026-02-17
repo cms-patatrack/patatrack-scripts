@@ -48,6 +48,32 @@ class Slot:
     slot_template = re.compile('^' + slot_format + '$')
 
 
+
+    # summarise the list A,..,B,C,D,...E into consecutive ranges A-B,C,D-E
+    @staticmethod
+    def format_ranges(args):
+        if not args:
+            return ""
+
+        args = sorted(args)
+        ranges = []
+        start = prev = args[0]
+
+        for n in args[1:]:
+            if n == prev + 1:
+                prev = n
+            else:
+                ranges.append((start, prev))
+                start = prev = n
+
+        ranges.append((start, prev))
+
+        return ",".join(
+            f"{s}-{e}" if s != e else f"{s}"
+            for s, e in ranges
+        )
+
+
     # expand the range A-B into A,..,..,B
     @staticmethod
     def parse_int_range(arg):
@@ -221,19 +247,19 @@ class Slot:
             if len(self.numa_cpu) == 1:
                 desc.append('with the NUMA compute node ' + str(self.numa_cpu[0]))
             else:
-                desc.append('with the NUMA compute nodes ' + ','.join(map(str, self.numa_cpu)))
+                desc.append('with the NUMA compute nodes ' + Slot.format_ranges(self.numa_cpu))
 
         if self.numa_mem is not None:
             if len(self.numa_mem) == 1:
                 desc.append('with the NUMA memory node ' + str(self.numa_mem[0]))
             else:
-                desc.append('with the NUMA memory nodes ' + ','.join(map(str, self.numa_mem)))
+                desc.append('with the NUMA memory nodes ' + Slot.format_ranges(self.numa_mem))
 
         if self.cpus is not None:
             if len(self.cpus) == 1:
                 desc.append('on the CPU ' + str(self.cpus[0]))
             else:
-                desc.append('on the CPUs ' + ','.join(map(str, self.cpus)))
+                desc.append('on the CPUs ' + Slot.format_ranges(self.cpus))
 
         if self.nvidia_gpus is None:
             desc.append('with any available NVIDIA GPUs')
