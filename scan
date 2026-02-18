@@ -139,11 +139,13 @@ if __name__ == "__main__":
   if not opts.steps:
     steps = list(range(opts.min_step, max_step + 1))
 
-  # prepare a trimmed down configuration for benchmarking only reading the input data
-  if opts.run_io_benchmark:
+  if opts.input_benchmark:
+    # prepare a trimmed down configuration for benchmarking only reading the input data
     io_process = copy.deepcopy(process)
-    io_process.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
-    io_process.path = cms.Path(io_process.hltGetRaw)
+    io_process.prefetch = cms.EDAnalyzer("GenericConsumer",
+        eventProducts = cms.untracked.vstring(opts.input_collections.split(','))
+    )
+    io_process.path = cms.Path(io_process.prefetch)
     io_process.schedule = cms.Schedule(io_process.path)
     if 'PrescaleService' in io_process.__dict__:
       del io_process.PrescaleService
@@ -182,9 +184,9 @@ if __name__ == "__main__":
       printCommonArgs(step_opt)
       
     # benchmark reading the input data
-    if opts.run_io_benchmark:
-      print('Benchmarking only I/O')
-      io_options = dict(step_opt, logdir = None, keep = [], data = None)
+    if opts.input_benchmark:
+      print('Benchmarking only the input')
+      io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None)
       multiCmsRun(io_process, **io_options)
       print()
       # schedule a wait after the I/O benchmark
