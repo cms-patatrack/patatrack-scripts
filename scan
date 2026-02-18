@@ -1,9 +1,15 @@
 #! /usr/bin/env python3
 
-import argparse
 import sys
 import os
+import copy
 
+# check that CMSSW_BASE is set
+if not 'CMSSW_BASE' in os.environ:
+    sys.stderr.write('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".\n')
+    sys.exit(1)
+
+# local packages
 from options import OptionParser, printCommonArgs
 from multirun import *
 
@@ -75,10 +81,6 @@ Selected Configuration:
 
 
 if __name__ == "__main__":
-  if not 'CMSSW_BASE' in os.environ:
-    print('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".')
-    sys.exit(1)
-
   opts = parseArguments()
 
   process = parseProcess(opts.config)

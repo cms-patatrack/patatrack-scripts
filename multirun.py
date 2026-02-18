@@ -2,6 +2,12 @@
 
 import sys
 import os
+
+# check that CMSSW_BASE is set
+if not 'CMSSW_BASE' in os.environ:
+    sys.stderr.write('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".\n')
+    sys.exit(1)
+
 import copy
 import glob
 import imp
@@ -29,12 +35,10 @@ try:
 except:
     pass
 
-# check that CMSSW_BASE is set
-if not 'CMSSW_BASE' in os.environ:
-    raise RuntimeError('Please load the CMSSW environment with "cmsenv"')
-
+# CMSSW python language
 import FWCore.ParameterSet.Config as cms
 
+# local packages
 from cpuinfo import *
 from gpuinfo import *
 from slot import Slot
