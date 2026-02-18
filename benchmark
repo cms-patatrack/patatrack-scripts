@@ -5,16 +5,20 @@ import os
 import copy
 import subprocess
 
+# check that CMSSW_BASE is set
+if not 'CMSSW_BASE' in os.environ:
+    sys.stderr.write('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".\n')
+    sys.exit(1)
+
+# CMSSW python language
+import FWCore.ParameterSet.Config as cms
+
+# local packages
 from options import OptionParser, printCommonArgs
 from multirun import *
 from slot import Slot
-import FWCore.ParameterSet.Config as cms
 
 if __name__ == "__main__":
-  if not 'CMSSW_BASE' in os.environ:
-    print('Error: the CMS environment is not set up, please run "cmsenv" or "eval `scram runtime -sh`".')
-    sys.exit(1)
-
   parser = OptionParser()
   opts = parser.parse(sys.argv[1:])
 
