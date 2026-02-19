@@ -14,6 +14,7 @@ if not 'CMSSW_BASE' in os.environ:
 import FWCore.ParameterSet.Config as cms
 
 # local packages
+from common import *
 from options import OptionParser, printCommonArgs
 from multirun import *
 from slot import Slot
@@ -83,10 +84,16 @@ if __name__ == "__main__":
     printCommonArgs(options)
     
   if opts.input_benchmark:
+    collections = opts.input_collections.split(',')
+
+    # read the list of input collections from the ReadBranches of a framework job report
+    if opts.input_xml:
+        collections = get_read_branch_names(opts.input_xml)
+
     # prepare a trimmed down configuration for benchmarking only reading the input data
     io_process = copy.deepcopy(process)
     io_process.prefetch = cms.EDAnalyzer("GenericConsumer",
-        eventProducts = cms.untracked.vstring(opts.input_collections.split(','))
+        eventProducts = cms.untracked.vstring(collections)
     )
     io_process.path = cms.Path(io_process.prefetch)
     io_process.schedule = cms.Schedule(io_process.path)

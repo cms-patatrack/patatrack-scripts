@@ -147,13 +147,21 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             dest = 'input_benchmark',
             action= 'store_false',
             help = 'do not run the input-only throughput measurements (equivalent to "--input-benchmark 0"). The legacy option name "--no-run-io-benchmark" is deprecated.')
-        self.parser.add_argument('--input-collections',
+        group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('--input-collections',
             dest = 'input_collections',
             metavar = 'BRANCH[,BRANCH,...]',
             action = 'store',
             type = str,
             default = 'rawDataCollector',
             help = 'comma-separated list of input collections to read for the input-only throughput measurements [default: rawDataCollector]')
+        group.add_argument('--input-xml',
+            dest = 'input_xml',
+            metavar = 'FILE',
+            action = 'store',
+            type = str,
+            default = None,
+            help = 'read the list of input collections to read for the input-only throughput measurements from a framework job report XML file.')
 
         group = self.parser.add_mutually_exclusive_group()
         group.add_argument('-R', '--reference-benchmark',
