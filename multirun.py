@@ -20,6 +20,7 @@ import tempfile
 import time
 from collections import defaultdict
 from datetime import datetime
+from enum import Enum
 
 # silence NumPy warnings about denormals
 import warnings
@@ -48,7 +49,21 @@ cpus = get_cpu_info()
 gpus_nv  = get_gpu_info_nvidia()
 gpus_amd = get_gpu_info_amd()
 
-# configure how to merge different files
+
+# Define whether to monitor the host memory usage by each process, and with how much detail:
+#   - NONE disable all process memory monitoring;
+#   - BASIC monitors the virtual memory size (VSS) and resident memory size (RSS);
+#   - FULL in addition monitors the proportional memory size (PSS).
+
+class HostMemoryInfo(Enum):
+  NONE = 0
+  BASIC = 1
+  FULL = 2
+
+monitoring = HostMemoryInfo.BASIC
+
+
+# Configure how to merge different files
 # 'inputs' can be
 #   - 'stdin'   to concatenate all inputs and pass them as standard input (NOT IMPLEMENTED), e.g.
 #                   cat in1 in2 in3 ... | command ...
@@ -222,14 +237,26 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
         job.communicate(timeout=0.)
     except subprocess.TimeoutExpired:
         pass
-    # measure the subprocess memory usage
-    try:
-      with proc.oneshot():
-        timestamp = datetime.now()
-        mem = proc.memory_full_info()
-        buffer_data.append((timestamp, mem.vms, mem.rss, mem.pss))  # time, vsize, rss, pss
-    except psutil.NoSuchProcess:
-      break
+    timestamp = datetime.now()
+    if monitoring == HostMemoryInfo.NONE:
+      # do not measure the subprocess memory usage
+      buffer_data.append((timestamp, 0, 0, 0))
+    else:
+      # measure the subprocess memory usage
+      try:
+        with proc.oneshot():
+          if monitoring == HostMemoryInfo.BASIC:
+            # memory_info() measures the process virtual memory size (VSS/vsize) and resident memory size (RSS), and
+            # consumes a negligible CPU usage, around 0.1% per job being monitored.
+            mem = proc.memory_info()
+            buffer_data.append((timestamp, mem.vms, mem.rss, 0))  # time, vsize, rss, n/a
+          elif monitoring == HostMemoryInfo.FULL:
+            # memory_full_info() is measures also the the process unique memory size (USS) and computes its proportional
+            # memory size (PSS), but may have a significan CPU usage, about 10% per job being monitored.
+            mem = proc.memory_full_info()
+            buffer_data.append((timestamp, mem.vms, mem.rss, mem.pss))  # time, vsize, rss, pss
+      except psutil.NoSuchProcess:
+        break
     # if requested, autodelete the files in the working directory
     if autodelete:
       stamp = datetime.now()
