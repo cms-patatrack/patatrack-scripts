@@ -14,6 +14,7 @@ if not 'CMSSW_BASE' in os.environ:
 import FWCore.ParameterSet.Config as cms
 
 # local packages
+from common import *
 from options import OptionParser, printCommonArgs
 from multirun import *
 from slot import Slot
@@ -82,18 +83,26 @@ if __name__ == "__main__":
   if opts.verbose:
     printCommonArgs(options)
     
-  if opts.run_io_benchmark:
+  if opts.input_benchmark:
+    collections = opts.input_collections.split(',')
+
+    # read the list of input collections from the ReadBranches of a framework job report
+    if opts.input_xml:
+        collections = get_read_branch_names(opts.input_xml)
+
     # prepare a trimmed down configuration for benchmarking only reading the input data
     io_process = copy.deepcopy(process)
-    io_process.hltGetRaw = cms.EDAnalyzer("HLTGetRaw", RawDataCollection = cms.InputTag("rawDataCollector"))
-    io_process.path = cms.Path(io_process.hltGetRaw)
+    io_process.prefetch = cms.EDAnalyzer("GenericConsumer",
+        eventProducts = cms.untracked.vstring(collections)
+    )
+    io_process.path = cms.Path(io_process.prefetch)
     io_process.schedule = cms.Schedule(io_process.path)
     if 'PrescaleService' in io_process.__dict__:
       del io_process.PrescaleService
 
     # benchmark reading the input data
-    print('Benchmarking only I/O')
-    io_options = dict(options, logdir = None, keep = [], data = None)
+    print('Benchmarking only the input')
+    io_options = dict(options, repeats = opts.input_benchmark, logdir = None, keep = [], data = None)
     multiCmsRun(io_process, **io_options)
     print()
     # wait the required number of seconds between the I/O benchmark and the actual measurement

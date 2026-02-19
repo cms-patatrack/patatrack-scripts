@@ -91,6 +91,7 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
 
         self.parser.add_argument('-j', '--jobs',
             dest = 'jobs',
+            metavar = 'JOBS',
             action = 'store',
             type = int,
             default = 2,
@@ -98,10 +99,11 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
 
         self.parser.add_argument('-r', '--repeats',
             dest = 'repeats',
+            metavar = 'N',
             action = 'store',
             type = int,
             default = 3,
-            help = 'repeat each measurement N times [default: 3]')
+            help = 'repeat each measurement N times, or indefinitely if 0 is given [default: 3]')
 
         self.parser.add_argument('--wait',
             dest = 'wait',
@@ -132,15 +134,34 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             help = 'number of GPUs used in each cmsRun job [default: 1]')
 
         group = self.parser.add_mutually_exclusive_group()
-        group.add_argument('--run-io-benchmark',
-            dest = 'run_io_benchmark',
-            action= 'store_true',
-            default = True,
-            help = 'measure the I/O benchmarks before the other measurements [default: True]')
-        group.add_argument('--no-run-io-benchmark',
-            dest = 'run_io_benchmark',
+        group.add_argument('--input-benchmark', '--run-io-benchmark',
+            dest = 'input_benchmark',
+            metavar = 'N',
+            action= 'store',
+            type = int,
+            nargs = '?',
+            const = -1,
+            default = -1,
+            help = 'measure the input-only throughput N times before performing any other measurements [default: as many repetitions as given by --repeats]. The legacy option name "--run-io-benchmark N" is deprecated.')
+        group.add_argument('--no-input-benchmark', '--no-run-io-benchmark',
+            dest = 'input_benchmark',
             action= 'store_false',
-            help = 'skip the I/O measurement')
+            help = 'do not run the input-only throughput measurements (equivalent to "--input-benchmark 0"). The legacy option name "--no-run-io-benchmark" is deprecated.')
+        group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('--input-collections',
+            dest = 'input_collections',
+            metavar = 'BRANCH[,BRANCH,...]',
+            action = 'store',
+            type = str,
+            default = 'rawDataCollector',
+            help = 'comma-separated list of input collections to read for the input-only throughput measurements [default: rawDataCollector]')
+        group.add_argument('--input-xml',
+            dest = 'input_xml',
+            metavar = 'FILE',
+            action = 'store',
+            type = str,
+            default = None,
+            help = 'read the list of input collections to read for the input-only throughput measurements from a framework job report XML file.')
 
         group = self.parser.add_mutually_exclusive_group()
         group.add_argument('-R', '--reference-benchmark',
@@ -328,6 +349,10 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
           except:
             print("The yappi package is not present, CPU usage profiling will be disabled.")
             options.debug_cpu_usage = False
+
+        # adjust the number of repetitions for the input-only benchmark
+        if options.input_benchmark == -1:
+            options.input_benchmark = options.repeats if options.repeats != 0 else 3
 
         return options
 
