@@ -10,7 +10,7 @@ if not 'CMSSW_BASE' in os.environ:
 
 import copy
 import glob
-import imp
+import importlib.util
 import itertools
 import math
 import psutil
@@ -101,6 +101,14 @@ auto_merge_map = {
     'output_options': None,
   }
 }
+
+
+def loadModuleFromFile(name, filename):
+    spec = importlib.util.spec_from_file_location(name, filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 def runMergeCommand(tag, workdir, inputs, output, verbose):
   if not tag in auto_merge_map:
@@ -352,22 +360,16 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
 def parseProcess(filename):
   # parse the given configuration file and return the `process` object it define
   # the import logic is taken from edmConfigDump
-  try:
-    handle = open(filename, 'r')
-  except:
-    print("Failed to open %s: %s" % (filename, sys.exc_info()[1]))
-    sys.exit(1)
 
   # make the behaviour consistent with 'cmsRun file.py'
   sys.path.append(os.getcwd())
   try:
-    pycfg = imp.load_source('pycfg', filename, handle)
+    pycfg = loadModuleFromFile('pycfg', filename)
     process = pycfg.process
   except:
     print("Failed to parse %s: %s" % (filename, sys.exc_info()[1]))
     sys.exit(1)
 
-  handle.close()
   return process
 
 
