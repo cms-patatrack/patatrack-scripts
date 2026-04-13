@@ -103,7 +103,7 @@ auto_merge_map = {
 }
 
 
-def load_module_from_file(name, filename):
+def loadModuleFromFile(name, filename):
     spec = importlib.util.spec_from_file_location(name, filename)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -364,7 +364,7 @@ def parseProcess(filename):
   # make the behaviour consistent with 'cmsRun file.py'
   sys.path.append(os.getcwd())
   try:
-    pycfg = load_module_from_file('pycfg', filename)
+    pycfg = loadModuleFromFile('pycfg', filename)
     process = pycfg.process
   except:
     print("Failed to parse %s: %s" % (filename, sys.exc_info()[1]))
