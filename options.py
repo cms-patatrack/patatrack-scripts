@@ -326,7 +326,11 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             action = 'store_true',
             default = False,
             help = 'Profile the CPU usage of this script itself [default: False]. Requires the "yappi" module to be installed.')
-
+        group.add_argument('--debug-logs',
+            dest = 'debug_logs',
+            action = 'store_true',
+            default = False,
+            help = 'Print full logs on job failure [default: False]')
 
     def parse(self, args):
         # parse the command line options

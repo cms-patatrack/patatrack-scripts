@@ -175,7 +175,7 @@ def runMergeCommand(tag, workdir, inputs, output, verbose):
 
 
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, slot = None, executable = 'cmsRun', environ = None, *args):
+def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, debug_logs = False, slot = None, executable = 'cmsRun', environ = None, *args):
   if slot is None:
       slot = Slot()
 
@@ -296,8 +296,13 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
   if (job.returncode < 0):
     print("The underlying %s job was killed by signal %d" % (executable, -job.returncode))
     print()
-    print("The last lines of the error log are:")
-    print("".join(stderr.readlines()[-10:]))
+    if debug_logs:
+        print("The full error log is:")
+        stderr.seek(0)
+        print("".join(stderr.readlines()))
+    else:
+        print("The last lines of the error log are:")
+        print("".join(stderr.readlines()[-10:]))
     print()
     print("See %s and %s for the full logs" % logfiles)
     sys.stdout.flush()
@@ -307,8 +312,13 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
   elif (job.returncode > 0):
     print("The underlying %s job failed with return code %d" % (executable, job.returncode))
     print()
-    print("The last lines of the error log are:")
-    print("".join(stderr.readlines()[-10:]))
+    if debug_logs:
+        print("The full error log is:")
+        stderr.seek(0)
+        print("".join(stderr.readlines()))
+    else:
+        print("The last lines of the error log are:")
+        print("".join(stderr.readlines()[-10:]))
     print()
     print("See %s and %s for the full logs" % logfiles)
     sys.stdout.flush()
@@ -402,6 +412,7 @@ def multiCmsRun(
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
     debug_cpu_usage = False,        # profile the CPU usage of this script itself (default: False)
     debug_affinity= False,          # print the jobs CPU and GPU affiniy and constraints (default: False)
+    debug_logs = False,             # print the full logs on job failure (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
     *args):                         # additional arguments passed to the executable
@@ -548,6 +559,7 @@ def multiCmsRun(
         autodelete = autodelete,
         autodelete_delay = autodelete_delay,
         verbose = verbose,
+        debug_logs = debug_logs,
         slot = slots[job],
         executable = executable,
         environ = environ,
@@ -636,6 +648,7 @@ def multiCmsRun(
         autodelete = autodelete,
         autodelete_delay = autodelete_delay,
         verbose = verbose,
+        debug_logs = debug_logs,
         slot = slots[job],
         executable = executable,
         environ = environ,
@@ -897,6 +910,7 @@ if __name__ == "__main__":
   opts = parser.parse(sys.argv[1:])
   options = {
     'verbose'             : opts.verbose,
+    'debug_logs'          : opts.debug_logs,
     'plumbing'            : opts.plumbing,
     'warmup'              : opts.warmup,
     'events'              : opts.events,

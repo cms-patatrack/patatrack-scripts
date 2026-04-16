@@ -26,6 +26,7 @@ if __name__ == "__main__":
   # common options for multirun
   options = {
     'verbose'             : opts.verbose,
+    'debug_logs'          : opts.debug_logs,
     'plumbing'            : opts.plumbing,
     'warmup'              : opts.warmup,
     'events'              : opts.events,
