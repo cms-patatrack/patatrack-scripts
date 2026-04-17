@@ -330,7 +330,8 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             dest = 'debug_logs',
             action = 'store_true',
             default = False,
-            help = 'Print full logs on job failure [default: False]')
+            help = 'Print full logs on job failure [default: False].')
+
 
     def parse(self, args):
         # parse the command line options

@@ -26,7 +26,6 @@ if __name__ == "__main__":
   # common options for multirun
   options = {
     'verbose'             : opts.verbose,
-    'debug_logs'          : opts.debug_logs,
     'plumbing'            : opts.plumbing,
     'warmup'              : opts.warmup,
     'events'              : opts.events,
@@ -54,6 +53,7 @@ if __name__ == "__main__":
     'autodelete_delay'    : opts.autodelete_delay,
     'debug_cpu_usage'     : opts.debug_cpu_usage,
     'debug_affinity'      : opts.debug_affinity,
+    'debug_logs'          : opts.debug_logs,
   }
 
   # print a system overview

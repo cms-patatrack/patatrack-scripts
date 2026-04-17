@@ -411,7 +411,7 @@ def multiCmsRun(
     autodelete = [],                # automatically delete files matching the given patterns while running the jobs (default: do not autodelete)
     autodelete_delay = 60.,         # check for files to autodelete with this interval (default: 60s)
     debug_cpu_usage = False,        # profile the CPU usage of this script itself (default: False)
-    debug_affinity= False,          # print the jobs CPU and GPU affiniy and constraints (default: False)
+    debug_affinity = False,         # print the jobs CPU and GPU affiniy and constraints (default: False)
     debug_logs = False,             # print the full logs on job failure (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
