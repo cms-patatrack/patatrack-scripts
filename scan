@@ -2,7 +2,6 @@
 
 import sys
 import os
-import copy
 
 # check that CMSSW_BASE is set
 if not 'CMSSW_BASE' in os.environ:
@@ -124,6 +123,8 @@ if __name__ == "__main__":
     'debug_cpu_usage'     : opts.debug_cpu_usage,
     'debug_affinity'      : opts.debug_affinity,
     'debug_logs'          : opts.debug_logs,
+    'host_memory_monitoring': HostMemoryInfo[opts.host_memory_monitoring.upper()],
+    'gpu_monitoring'        : GpuMonitorInfo[opts.gpu_monitoring.upper()],
   }
 
   # print a system overview
@@ -194,10 +195,10 @@ if __name__ == "__main__":
     if opts.verbose:
       printCommonArgs(step_opt)
       
-    # benchmark reading the input data
+    # benchmark reading the input data; do not monitor this throwaway I/O-only run
     if opts.input_benchmark:
       print('Benchmarking only the input')
-      io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None)
+      io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None, gpu_monitoring = GpuMonitorInfo.NONE)
       multiCmsRun(io_process, **io_options)
       print()
       # schedule a wait after the I/O benchmark

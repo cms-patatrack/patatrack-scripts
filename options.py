@@ -475,6 +475,18 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = False,
             help = 'Print full logs on job failure [default: False].')
 
+        group = self.parser.add_argument_group('monitoring options')
+        monitor_levels = ['none', 'basic', 'full']
+        group.add_argument('--monitor-host',
+            dest = 'host_memory_monitoring',
+            choices = monitor_levels,
+            default = 'basic',
+            help = 'per-process host memory monitoring detail: none, basic (VSS+RSS), or full (+PSS, ~10%% CPU per job) [default: basic]')
+        group.add_argument('--monitor-gpu',
+            dest = 'gpu_monitoring',
+            choices = monitor_levels,
+            default = 'basic',
+            help = 'unified CPU+GPU resource monitoring detail: none, basic (GPU utilization+memory), or full (+power+temperature). Samples the in-use NVIDIA (AMD) GPUs via nvidia-smi (amd-smi) on the same cadence as the aggregate host memory; auto-disabled if no supported GPU is present [default: basic]')
 
 
     def parse(self, args):
