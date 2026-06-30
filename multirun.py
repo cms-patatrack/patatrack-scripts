@@ -117,15 +117,36 @@ auto_merge_map = {
 }
 
 
-def runMergeCommand(tag, workdir, inputs, output, verbose):
-  if not tag in auto_merge_map:
+def fasttimerservice_json(process):
+  # the name of the JSON file written by the configuration's FastTimerService (e.g. "resources.json"
+  # or "Phase2Timing_resources.json"), or None if the configuration does not write one
+  if 'FastTimerService' not in process.__dict__:
+    return None
+  service = process.FastTimerService
+  if not (hasattr(service, 'writeJSONSummary') and service.writeJSONSummary.value()):
+    return None
+  return service.jsonFileName.value() if hasattr(service, 'jsonFileName') else 'resources.json'
+
+
+def auto_merge_entry(tag, resources_json = None):
+  # return the auto-merge configuration for a --keep entry, or None if it is not supported. The JSON
+  # file written by the configuration's FastTimerService (resources_json, see fasttimerservice_json)
+  # has the format of resources.json, so it is merged the same way whatever its name.
+  if tag in auto_merge_map:
+    return auto_merge_map[tag]
+  if resources_json is not None and tag == resources_json:
+    return auto_merge_map['resources.json']
+  return None
+
+
+def runMergeCommand(entry, workdir, inputs, output, verbose):
+  if entry is None:
     return
 
   # do not run the merge command if there are no input files
   if not inputs:
     return
 
-  entry = auto_merge_map[tag]
   cmd = entry['cmd']
   args = entry['args']
   ins = entry['inputs']
@@ -1245,7 +1266,7 @@ def multiCmsRun(
     warmup = True,                  # whether to run an extra warm-up job
     tmpdir = None,                  # temporary directory, or None to use a system dependent default temporary directory (default: None)
     logdir = None,                  # a relative or absolute path where to store individual jobs' log files, or None
-    keep = [],                      # additional output files to be kept
+    keep = None,                    # additional output files to be kept, or None for the JSON file written by the configuration's FastTimerService (if any)
     verbose = False,                # whether to print extra messages
     plumbing = False,               # print output in a machine-readable format
     events = -1,                    # number of events to process (default: unlimited)
@@ -1304,6 +1325,12 @@ def multiCmsRun(
     limit = cms.untracked.int32(10000000),
     reportEvery = cms.untracked.int32(1)
   )
+
+  # keep by default the JSON file written by the configuration's FastTimerService; the auto-merge
+  # recognises it whatever its name
+  resources_json = fasttimerservice_json(process)
+  if keep is None:
+    keep = [ resources_json ] if resources_json else []
 
   # per-job DAQ output directory
   daqdir = None
@@ -1528,6 +1555,8 @@ def multiCmsRun(
     # of repeat indices whose measurement was discarded (a set, so it also works in indefinite mode
     # where `repeats` is 0 and the repeat index grows without bound)
     failed = set()
+    # --keep entries already reported as matching no output file
+    keep_warned = set()
     if repeats > 1 and not plumbing:
       throughputs         = [ None ] * repeats
       overlaps            = [ None ] * repeats
@@ -1628,13 +1657,22 @@ def multiCmsRun(
         failed.add(repeat)
         continue
 
+      # warn once per --keep entry that none of the jobs produced a matching file
+      if thislogdir:
+        for tag in keep:
+          if tag not in keep_warned and not glob.glob(f'{thislogdir}/pid*/{tag}'):
+            print('Warning: none of the jobs produced an output file matching "%s" (--keep)' % tag)
+            sys.stdout.flush()
+            keep_warned.add(tag)
+
       # auto-merge supported outputs
       if thislogdir and automerge:
         for tag in keep:
-          if tag in auto_merge_map:
+          entry = auto_merge_entry(tag, resources_json)
+          if entry is not None:
             inputs = glob.glob(f'{thislogdir}/pid*/{tag}')
             output = f'{thislogdir}/{tag}'
-            runMergeCommand(tag, workdir, inputs, output, verbose)
+            runMergeCommand(entry, workdir, inputs, output, verbose)
 
       # if all jobs were successful, delete the temporary directories
       for job in range(jobs):
@@ -1758,10 +1796,11 @@ def multiCmsRun(
     # auto-merge supported outputs
     if logdir and automerge:
       for tag in keep:
-        if tag in auto_merge_map:
+        entry = auto_merge_entry(tag, resources_json)
+        if entry is not None:
           inputs = glob.glob(f'{logdir}/step*/{tag}')
           output = f'{logdir}/{tag}'
-          runMergeCommand(tag, workdir, inputs, output, verbose)
+          runMergeCommand(entry, workdir, inputs, output, verbose)
 
     # compute the average throughput over the repetitions
     if repeats > 1 and not plumbing:

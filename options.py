@@ -63,6 +63,43 @@ def _config_like_hint(value):
                'e.g. "--setup j=J,t=T,s=S -- config.py")'
     return ''
 
+# named option presets, applied as defaults by "--preset NAME" (see OptionParser.parse).
+# To add a new preset, add an entry here: 'description' is shown in --help, and 'options' maps
+# option dests to the default values to pre-load. The special entry input_xml='auto' is only
+# applied when the user did not pass --input-collections (the two are mutually exclusive).
+presets = {
+    'hltRun3': {
+        'description': 'standard Run3 HLT timing setup',
+        'options': dict(
+            events = 10300,
+            event_skip = 300,
+            event_resolution = 100,
+            wait = 0.,
+            jobs = 8,
+            threads = 32,
+            streams = 24,
+            output_log = True,
+            logdir = default_logdir_template,
+            input_collections = 'rawDataCollector',
+        ),
+    },
+    'hltPhase2': {
+        'description': 'standard Phase-2 HLT timing setup',
+        'options': dict(
+            events = 1000,
+            event_skip = 100,
+            event_resolution = 25,
+            wait = 30.,
+            jobs = 16,
+            threads = 16,
+            streams = 16,
+            output_log = True,
+            logdir = default_logdir_template,
+            input_xml = 'auto',
+        ),
+    },
+}
+
 def parse_setup(value):
     # parse an explicit "j=J,t=T,s=S" preset into a (jobs, threads, streams) tuple. The fields may be
     # given in any order, using the keys j/t/s (or the long aliases jobs/threads/streams), and any
@@ -163,6 +200,16 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             default = 'cmsRun',
             help = 'specify what executable to run [default: cmsRun]')
 
+        self.parser.add_argument('--preset',
+            dest = 'preset',
+            metavar = 'NAME',
+            choices = sorted(presets),
+            default = None,
+            help = 'apply a named preset of default options before parsing the rest of the command '
+                   'line, so any preset value can still be overridden by passing that option explicitly '
+                   '(e.g. "--preset hltRun3 --no-input-benchmark" or "--preset hltRun3 --setup j=32,t=8,s=8"). '
+                   'Available presets: ' + '; '.join('%s = %s' % (n, presets[n]['description']) for n in sorted(presets)) +
+                   ' [default: none]')
 
         self.parser.add_argument('-e', '--events',
             dest = 'events',
@@ -423,9 +470,9 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
         self.parser.add_argument('-k', '--keep',
             dest='keep',
             nargs='+',
-            default=['resources.json'],
+            default=None,
             metavar='FILE',
-            help= 'list of additional output files to be kept in logdir, along with the logs [default: "resources.json"]. For example, the argument "-k resources.json DQM.root --" keeps resources.json and DQM.root. Note: the dashes "--" avoid the parser to consume unintended arguments afterwards.'
+            help= 'list of additional output files to be kept in logdir, along with the logs [default: the JSON file written by the FastTimerService of the configuration, if any]. For example, the argument "-k resources.json DQM.root --" keeps resources.json and DQM.root. Note: the dashes "--" avoid the parser to consume unintended arguments afterwards.'
         )
 
         group = self.parser.add_mutually_exclusive_group()
@@ -490,6 +537,17 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
 
 
     def parse(self, args):
+        # if "--preset NAME" is requested, raise the relevant defaults to that preset. These are
+        # applied as argparse defaults, so any option the user passes explicitly still takes
+        # precedence over the preset.
+        pre, _ = self.parser.parse_known_args(args)
+        if pre.preset:
+            preset = dict(presets[pre.preset]['options'])
+            # input_xml='auto' is only applied if the user did not pick explicit input collections
+            # (which are mutually exclusive with --input-xml)
+            if 'input_xml' in preset and any(a == '--input-collections' or a.startswith('--input-collections=') for a in args):
+                del preset['input_xml']
+            self.parser.set_defaults(**preset)
 
         # parse the command line options
         options, unknown = self.parser.parse_known_args(args)
