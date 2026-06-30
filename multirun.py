@@ -15,6 +15,7 @@ import math
 import psutil
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -402,8 +403,8 @@ _nvidia_backend = GpuBackend('nvidia', _nvidia_sample, _nvidia_busy_devices)
 _amd_backend    = GpuBackend('amd', _amd_sample, _amd_busy_devices)
 
 # a single monitored GPU: its backend, its (vendor-local) device index, a field-safe column
-# name and a human-readable label. On single-vendor machines the name/label are "gpu<d>"/"GPU-<d>"
-# (preserving the legacy output); on mixed machines they are vendor-qualified ("nvidia0"/"NVIDIA-0").
+# name and a human-readable label. On single-vendor machines the name/label are "gpu<d>"/"GPU-<d>";
+# on mixed machines they are vendor-qualified ("nvidia0"/"NVIDIA-0") to keep the indices unambiguous.
 MonGpu = namedtuple('MonGpu', ['backend', 'index', 'name', 'label'])
 
 
@@ -484,11 +485,43 @@ def monitored_gpus():
     return out
   return gpus
 
+
+def assign_gpus(gpus, jobs, gpus_per_job):
+  # distribute one vendor's GPUs across the jobs: if a job asks for at least as many GPUs as there
+  # are, every job runs on all of them; otherwise the GPUs are handed out round-robin. Returns one
+  # comma-separated GPU list per job. Used both for the actual per-job affinity (multiCmsRun) and to
+  # work out how many jobs share each GPU for the NVIDIA MPS tag (nvidia_mps_tag).
+  keys = list(gpus.keys())
+  if gpus_per_job >= len(keys):
+    return [ ','.join(map(str, keys)) for _ in range(jobs) ]
+  repeated = list(map(str, itertools.islice(itertools.cycle(keys), jobs * gpus_per_job)))
+  return [ ','.join(repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
+
+
+def nvidia_mps_tag(nvidia_mps, jobs, gpus_per_job, gpus_nv, slots = None):
+  # build a short, filename-safe tag for the NVIDIA MPS setting: empty when no NVIDIA GPU is in use,
+  # "noMPS" when NVIDIA MPS is off, otherwise "MPS<percentage>" or "MPS<low>-<high>" for different
+  # percentages. Percentages mirror multiCmsRun (nvidia_mps_slot_percentages); uses --slot when given,
+  # else the automatic round-robin assignment.
+  if not gpus_nv:
+    return ''
+  if not slots:
+    slots = [ Slot(nvidia_gpus = a) for a in assign_gpus(gpus_nv, jobs, gpus_per_job) ]
+  else:
+    # reuse the --slot entries round-robin over the jobs, as multiCmsRun does
+    slots = list(itertools.islice(itertools.cycle(slots), jobs))
+  pcts = [ p for p in nvidia_mps_slot_percentages(nvidia_mps, slots, gpus_nv) if p is not None ]
+  if not pcts:
+    return 'noMPS'
+  lo, hi = min(pcts), max(pcts)
+  return 'MPS%d' % lo if lo == hi else 'MPS%d-%d' % (lo, hi)
+
+
 def config_accelerators(process):
   # the accelerator tokens a configuration allows (process.options.accelerators, e.g. ['cpu'],
   # ['gpu-nvidia'], or ['*'] for "everything available"); an empty or missing list is treated as
-  # ['*']. Lets a CPU-only configuration (accelerators = ['cpu']) drop the %gpus tag even on a GPU
-  # node, without needing "-g 0" or "--gpus".
+  # ['*']. Lets a CPU-only configuration (accelerators = ['cpu']) drop the %gpus/%mps tags even on a
+  # GPU node, without needing "-g 0" or "--gpus".
   try:
     acc = list(process.options.accelerators)
   except (AttributeError, TypeError):
@@ -517,21 +550,31 @@ def gpu_in_use(gpus_per_job, process = None):
   return any(a == '*' or a.startswith('gpu') for a in config_accelerators(process))
 
 
-def expand_logdir(template, config, jobs, threads, streams, gpus_per_job, gpu_tag):
+def nvidia_in_use(gpus_per_job, process = None):
+  # whether the run uses an NVIDIA GPU (the only vendor NVIDIA MPS applies to), likewise honouring
+  # the configuration's accelerators when a parsed process is given. Used to drop the %mps tag.
+  if not (gpus_per_job > 0 and bool(gpus_nv)):
+    return False
+  if process is None:
+    return True
+  return any(a == '*' or a == 'gpu-nvidia' for a in config_accelerators(process))
+
+
+def expand_logdir(template, config, jobs, threads, streams, gpus_per_job, gpu_tag, nvidia_mps_tag):
   # expand the placeholders in a --logdir template into the per-run directory name, or return None
   # if no logs should be stored. The placeholders (their names, descriptions and how each is
   # rendered) come from the single registry options.logdir_placeholders.
   if not template:
     return None
   params = { 'config': config, 'jobs': jobs, 'threads': threads, 'streams': streams,
-             'gpus_per_job': gpus_per_job, 'gpu_tag': gpu_tag }
-  # an optional tag (%gpus) renders to '' and is then dropped together with its separator
+             'gpus_per_job': gpus_per_job, 'gpu_tag': gpu_tag, 'nvidia_mps_tag': nvidia_mps_tag }
+  # an optional tag (%gpus / %mps) renders to '' and is then dropped together with its separator
   values = { name: render(params) for name, _desc, render in logdir_placeholders }
   # Substitute placeholders in one left-to-right pass (a value that itself contains a "%x" token,
   # e.g. a config name, is not re-scanned). Each placeholder may absorb one preceding separator (any
   # non-alphanumeric char): when it expands to empty -- an optional tag that does not apply, like
-  # %gpus with no GPU -- the separator is dropped too, leaving nothing dangling. No name is a prefix
-  # of another, so the longest-first alternation is unambiguous.
+  # %gpus with no GPU or %mps with no NVIDIA GPU -- the separator is dropped too, leaving nothing
+  # dangling. No name is a prefix of another, so the longest-first alternation is unambiguous.
   names = sorted(values, key = len, reverse = True)
   pattern = r'([^%0-9A-Za-z])?%(' + '|'.join(names) + r')'
   def _expand(m):
@@ -667,6 +710,243 @@ def apply_gpu_selection(spec):
       os.environ['CUDA_VISIBLE_DEVICES'] = value
 
 
+# ---------------------------------------------------------------------------
+# NVIDIA MPS (Multi-Process Service) control
+# ---------------------------------------------------------------------------
+
+def nvidia_mps_running():
+  # return True if the NVIDIA MPS control daemon is currently running. Queried via the control
+  # protocol itself, which is authoritative: a running daemon answers with a number, while a missing
+  # one prints "Cannot find MPS control daemon process" and exits non-zero. (pgrep is unreliable
+  # here: the process "comm" is truncated to 15 chars, "nvidia-cuda-mps".)
+  return get_nvidia_mps_default_percentage() is not None
+
+
+def ensure_nvidia_mps_off():
+  # for --no-nvidia-mps: never start NVIDIA MPS, and refuse to run if a control daemon is already
+  # active, since a pre-existing daemon would silently apply its own active-thread percentage to the jobs.
+  # Prints a clear, actionable error and exits non-zero.
+  if nvidia_mps_running():
+    sys.stderr.write(
+      'Error: --no-nvidia-mps was given but an NVIDIA MPS control daemon is already running. '
+      'Stop it (e.g. "echo quit | nvidia-cuda-mps-control") or drop --no-nvidia-mps.\n')
+    sys.exit(1)
+
+
+def use_nvidia_mps(nvidia_mps, gpus_per_job, slots = None, no_nvidia_mps = False):
+  # whether to actually start NVIDIA MPS: it is requested -- either globally with --nvidia-mps, or by
+  # an "nvidia-mps=" field in at least one --slot entry -- and the jobs will use an NVIDIA GPU.
+  # --no-nvidia-mps overrides a slot's "nvidia-mps=" field and prevents the daemon from starting.
+  if no_nvidia_mps and any(slot.nvidia_mps is not None for slot in (slots or [])):
+    print('Warning: --no-nvidia-mps was given, but a --slot "nvidia-mps=" field requests NVIDIA MPS; '
+          'not starting the NVIDIA MPS control daemon (the slot setting is ignored).')
+    sys.stdout.flush()
+    return False
+  if nvidia_mps is not None:
+    requested = '--nvidia-mps'
+  elif any(slot.nvidia_mps is not None for slot in (slots or [])):
+    requested = 'an "nvidia-mps=" field in --slot'
+  else:
+    return False
+  if nvidia_in_use(gpus_per_job):
+    return True
+  reason = 'no NVIDIA GPU is available' if not gpus_nv else 'the jobs use no GPU (--gpus-per-job 0)'
+  print('Warning: %s requested but %s; not starting the NVIDIA MPS control daemon.' % (requested, reason))
+  sys.stdout.flush()
+  return False
+
+
+def start_nvidia_mps():
+  # start the NVIDIA MPS control daemon in the background; return True on success
+  exe = shutil.which('nvidia-cuda-mps-control')
+  if not exe:
+    print('Warning: --nvidia-mps requested but "nvidia-cuda-mps-control" was not found.')
+    sys.stdout.flush()
+    return False
+  result = subprocess.run([exe, '-d'], stdout = subprocess.PIPE, stderr = subprocess.STDOUT, text = True)
+  if result.returncode != 0:
+    print('Warning: could not start the NVIDIA MPS control daemon:\n' + (result.stdout or ''))
+    sys.stdout.flush()
+    return False
+  print('Started the NVIDIA MPS control daemon')
+  sys.stdout.flush()
+  return True
+
+
+def stop_nvidia_mps():
+  # stop the NVIDIA MPS control daemon. The clean "quit" is bounded by a timeout so a wedged
+  # daemon (e.g. after an interrupted run abruptly killed its clients) cannot hang the cleanup; the
+  # control daemon is then force-killed so a wedged one never survives. The force-kill matches the
+  # exact command line we started the daemon with ("nvidia-cuda-mps-control -d"), so it hits only
+  # that daemon and NOT: the per-user NVIDIA MPS server(s) - whose comm truncates to the same 15 chars
+  # "nvidia-cuda-mps" and which on a shared node may still be serving a concurrent run's jobs - nor
+  # any unrelated process that merely mentions "nvidia-cuda-mps-control" in its command line.
+  # (A control daemon is shared per user, so a concurrent --nvidia-mps run that attached to it will
+  # still lose it here; its in-flight jobs keep running on the surviving server.)
+  exe = shutil.which('nvidia-cuda-mps-control')
+  if exe:
+    try:
+      subprocess.run([exe], input = 'quit\n', stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL, text = True, timeout = 10)
+    except Exception:
+      pass
+  try:
+    subprocess.run(['pkill', '-9', '-u', str(os.getuid()), '-f', 'nvidia-cuda-mps-control -d'],
+                   stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL, timeout = 10)
+  except Exception:
+    pass
+  print('Stopped the NVIDIA MPS control daemon')
+  sys.stdout.flush()
+
+
+def get_nvidia_mps_default_percentage():
+  # return the NVIDIA MPS daemon's current default active thread percentage as a float, or None
+  exe = shutil.which('nvidia-cuda-mps-control')
+  if not exe:
+    return None
+  try:
+    result = subprocess.run([exe], input = 'get_default_active_thread_percentage\n',
+                            stdout = subprocess.PIPE, stderr = subprocess.STDOUT, text = True, timeout = 10)
+  except Exception:
+    return None
+  if result.returncode != 0:
+    return None
+  try:
+    return float(result.stdout.strip().splitlines()[-1])
+  except Exception:
+    return None
+
+
+def set_nvidia_mps_default_percentage(pct):
+  # set the NVIDIA MPS daemon's default active thread percentage (applies to servers created afterwards)
+  exe = shutil.which('nvidia-cuda-mps-control')
+  if not exe:
+    return
+  try:
+    subprocess.run([exe], input = 'set_default_active_thread_percentage %g\n' % float(pct),
+                   stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL, text = True, timeout = 10)
+  except Exception:
+    pass
+
+
+class nvidia_mps_session:
+  # context manager that, when enabled, starts the NVIDIA MPS control daemon if it is not already
+  # running. On exit it stops the daemon only if it was started here; if it was already running,
+  # the daemon is left running and its default active thread percentage is restored to the value
+  # it had before (multiCmsRun raises that default so the requested --nvidia-mps percentage is honoured
+  # and not clamped by a lower pre-existing default).
+  #
+  # The cleanup also runs on SIGINT (Ctrl+C) and SIGTERM, so an interrupted run does not leave a
+  # wedged NVIDIA MPS daemon behind; the cleanup is idempotent so it runs at most once.
+  def __init__(self, enabled):
+    self.enabled = enabled
+    self.started = False
+    self.attached = False
+    self.saved_default = None
+    self.cleaned = False
+    self.prev_handlers = {}
+
+  def __enter__(self):
+    if self.enabled:
+      if not nvidia_mps_running():
+        self.started = start_nvidia_mps()
+      else:
+        # we are attaching to a pre-existing daemon; remember its default so we can restore it
+        self.attached = True
+        self.saved_default = get_nvidia_mps_default_percentage()
+      # install signal handlers so Ctrl+C / SIGTERM also clean up (signals are only deliverable
+      # to the main thread; ignore failures if we are not in it)
+      if self.started or self.attached:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+          try:
+            self.prev_handlers[sig] = signal.getsignal(sig)
+            signal.signal(sig, self._on_signal)
+          except (ValueError, OSError):
+            pass
+    return self
+
+  def _cleanup(self):
+    if self.cleaned:
+      return
+    self.cleaned = True
+    if self.started:
+      stop_nvidia_mps()
+    elif self.attached:
+      # multiCmsRun raises this daemon's default active thread percentage so the requested --nvidia-mps
+      # value is not clamped; restore the pre-existing default on exit. If it could not be read,
+      # fall back to 100 (the NVIDIA MPS factory default) rather than leaving the shared daemon at our
+      # raised value.
+      set_nvidia_mps_default_percentage(self.saved_default if self.saved_default is not None else 100.)
+
+  def _on_signal(self, signum, frame):
+    self._cleanup()
+    # restore handlers and exit with the conventional 128+signal code
+    self._restore_handlers()
+    sys.exit(128 + signum)
+
+  def _restore_handlers(self):
+    for sig, handler in self.prev_handlers.items():
+      try:
+        signal.signal(sig, handler)
+      except (ValueError, OSError, TypeError):
+        pass
+    self.prev_handlers = {}
+
+  def __exit__(self, *exc):
+    self._restore_handlers()
+    self._cleanup()
+    return False
+
+
+def nvidia_mps_slot_percentages(nvidia_mps, slots, gpus_nv):
+  # compute the NVIDIA MPS active thread percentage for each job slot, based on how many jobs
+  # actually land on each NVIDIA GPU (derived from the slots, so it works with --slot as well as with
+  # the automatic GPU affinity). Returns a list with one entry per slot, using None where NVIDIA MPS
+  # does not apply (NVIDIA MPS off, no NVIDIA GPU, or a slot that uses no GPU). A positive
+  # `nvidia_mps` is used verbatim for every GPU-using slot; a non-positive `nvidia_mps` (the
+  # value-less "--nvidia-mps" passes -1) splits each GPU evenly among the jobs sharing it:
+  # ceil(100 / (jobs on the busiest GPU the slot uses)).
+  # An explicit "nvidia-mps=" field in a --slot entry is taken verbatim and wins over the global rule, so a
+  # single --slot may pin its own percentage while the other slots follow --nvidia-mps (or none).
+  explicit = [ slot.nvidia_mps for slot in slots ]
+  if not gpus_nv or (nvidia_mps is None and not any(p is not None for p in explicit)):
+    return [ None ] * len(slots)
+
+  all_gpus = set(str(g) for g in gpus_nv.keys())
+  # the set of NVIDIA GPUs each slot uses: None means "any/all visible GPUs", a set may be empty
+  slot_gpus = []
+  for slot in slots:
+    if slot.nvidia_gpus is None:
+      slot_gpus.append(None)
+    else:
+      s = set(slot.nvidia_gpus)
+      slot_gpus.append(s)
+      all_gpus |= s
+
+  # count how many jobs use each GPU; an unconstrained (None) slot counts on every GPU
+  counts = { g: 0 for g in all_gpus }
+  for s in slot_gpus:
+    for g in (all_gpus if s is None else s):
+      counts[g] += 1
+
+  result = []
+  for s, own in zip(slot_gpus, explicit):
+    if s is not None and len(s) == 0:
+      result.append(None)                                   # this slot uses no GPU
+    elif own is not None:
+      result.append(own)                                    # explicit "nvidia-mps=" in this --slot
+    elif nvidia_mps is None:
+      result.append(None)                                   # only other slots set "nvidia-mps="
+    elif nvidia_mps > 0:
+      result.append(nvidia_mps)                             # explicit percentage
+    else:
+      targets = all_gpus if s is None else s
+      share = max((counts[g] for g in targets), default = 1)
+      # split the busiest GPU evenly, rounding the share UP (ceil): e.g. 16 jobs on a GPU -> 7% each
+      # (not the floored 6%), so the jobs are allowed to use the whole GPU rather than leaving it idle
+      result.append(max(1, -(-100 // max(1, share))))
+  return result
+
+
 class _MonitorState:
   # shared between the resource monitor thread and multiCmsRun: the accumulated sample rows, the
   # numpy dtype, and the detected in-use GPU set. Rows are consumed either by drain() (take + clear:
@@ -737,7 +1017,7 @@ def monitorResources(stop, gpus, level, state, streamer = None, interval = 1.):
           pass
     except Exception:
       # never let a transient psutil error (AccessDenied, a vanished or zombie child, ...) kill the
-      # monitor thread: a dead thread would later block multiCmsRun forever on result.get()
+      # monitor thread: a dead thread enqueues no result, so its whole output would be dropped
       pass
     row = [timestamp, rss]
     # one sampling command per backend, shared across that backend's GPUs
@@ -923,7 +1203,7 @@ def appendStepResource(logdir, resource, inuse, level):
 
 
 def printHardwareSummary(data, inuse, level, interval = 1.):
-  # print a peak/mean summary of the CPU and GPU usage, reproducing hltTiming.sh's summary
+  # print a peak/mean summary of the aggregate CPU and per-GPU usage
   if data is None or len(data) == 0:
     return
   cpu_mib = data['cpu_rss'].astype('float64') / (1024 * 1024)
@@ -1259,6 +1539,46 @@ def parseProcess(filename):
   return process
 
 
+def build_options(opts, jobs, threads, streams, logdir = None, data = None, header = True):
+  # assemble the keyword arguments for multiCmsRun from the parsed command-line options, with the
+  # per-run jobs/threads/streams/logdir (and optional CSV data file and header) supplied by the
+  # caller. Shared by benchmark, scan and multirun.py so a new option is wired in a single place.
+  return {
+    'verbose'             : opts.verbose,
+    'plumbing'            : opts.plumbing,
+    'warmup'              : opts.warmup,
+    'events'              : opts.events,
+    'resolution'          : opts.event_resolution,
+    'skipevents'          : opts.event_skip,
+    'repeats'             : opts.repeats,
+    'wait'                : opts.wait,
+    'jobs'                : jobs,
+    'threads'             : threads,
+    'streams'             : streams,
+    'gpus_per_job'        : opts.gpus_per_job,
+    'allow_hyperthreading': opts.allow_hyperthreading,
+    'set_numa_affinity'   : opts.numa_affinity,
+    'set_cpu_affinity'    : opts.cpu_affinity,
+    'set_gpu_affinity'    : opts.gpu_affinity,
+    'slots'               : opts.slots,
+    'executable'          : opts.executable,
+    'data'                : data,
+    'header'              : header,
+    'logdir'              : logdir,
+    'tmpdir'              : opts.tmpdir,
+    'keep'                : opts.keep,
+    'automerge'           : opts.automerge,
+    'autodelete'          : opts.autodelete,
+    'autodelete_delay'    : opts.autodelete_delay,
+    'debug_cpu_usage'     : opts.debug_cpu_usage,
+    'debug_affinity'      : opts.debug_affinity,
+    'debug_logs'          : opts.debug_logs,
+    'host_memory_monitoring': HostMemoryInfo[opts.host_memory_monitoring.upper()],
+    'gpu_monitoring'        : GpuMonitorInfo[opts.gpu_monitoring.upper()],
+    'nvidia_mps'          : opts.nvidia_mps,
+  }
+
+
 def multiCmsRun(
     process,                        # the cms.Process object to run
     data = None,                    # a file-like object for storing performance measurements
@@ -1293,6 +1613,7 @@ def multiCmsRun(
     environ = None,                 # shell environment to use instead of os.environ
     host_memory_monitoring = HostMemoryInfo.BASIC,   # per-process host memory monitoring detail
     gpu_monitoring = GpuMonitorInfo.NONE,            # unified device-level CPU+GPU monitoring detail
+    nvidia_mps = None,              # NVIDIA MPS active thread percentage: an integer, or <=0 to split evenly among the jobs per GPU, or None to not use NVIDIA MPS
     monitor = None,                 # a shared RunMonitor to slice per-step data from (its owner writes the continuous top-level CSVs); None to use this run's own monitor
     source_config = None,           # path to the original configuration file; when set together with logdir, the fully-expanded dump that is actually run is also saved as <logdir>/<stem>_dump.py
     *args):                         # additional arguments passed to the executable
@@ -1349,8 +1670,7 @@ def multiCmsRun(
   config.close()
 
   # also save the fully-expanded configuration next to the job logs, so each run records both the
-  # original file (copied by the caller) and the exact customised process this runs -- the dump
-  # above, with the per-setup thread/stream/event changes already applied
+  # original file (copied by the caller) and the exact customised process that is run
   if logdir is not None and source_config is not None:
     os.makedirs(logdir, exist_ok = True)
     stem, ext = os.path.splitext(os.path.basename(source_config))
@@ -1412,28 +1732,36 @@ def multiCmsRun(
         cpu_assignment = [ ','.join(cpu_list[index[i]:index[i+1]]) for i in range(jobs) ]
 
     if set_gpu_affinity:
-      # build the list of GPUs for each job, separately for each vendor:
-      #   - if the number of GPUs per job is greater than or equal to the number of GPUs of that
-      #     vendor, run each job on all of them
-      #   - otherwise, assign GPUs to jobs in a round-robin fashion
-      # Only vendors that actually have GPUs are assigned: leaving the other vendor's slot as None
-      # avoids setting an empty CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES, which would disable all
-      # GPUs of that vendor (and note that HIP also honours CUDA_VISIBLE_DEVICES, so on an AMD-only
-      # system an empty CUDA_VISIBLE_DEVICES would hide the AMD GPUs too).
-      def assign_gpus(gpus):
-        keys = list(gpus.keys())
-        if gpus_per_job >= len(keys):
-          return [ ','.join(map(str, keys)) for i in range(jobs) ]
-        repeated = list(map(str, itertools.islice(itertools.cycle(keys), jobs * gpus_per_job)))
-        return [ ','.join(repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
-
+      # assign each vendor's GPUs to the jobs with assign_gpus. Only vendors that actually have GPUs
+      # are assigned: leaving the other vendor's slot as None avoids setting an empty
+      # CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES, which would disable all GPUs of that vendor (and
+      # note that HIP also honours CUDA_VISIBLE_DEVICES, so on an AMD-only system an empty
+      # CUDA_VISIBLE_DEVICES would hide the AMD GPUs too).
       if gpus_nv:
-        gpu_assignment_nvidia = assign_gpus(gpus_nv)
+        gpu_assignment_nvidia = assign_gpus(gpus_nv, jobs, gpus_per_job)
       if gpus_amd:
-        gpu_assignment_amd = assign_gpus(gpus_amd)
+        gpu_assignment_amd = assign_gpus(gpus_amd, jobs, gpus_per_job)
 
     # define the execution environments
     slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment_nvidia[job], amd_gpus = gpu_assignment_amd[job]) for job in range(jobs) ]
+
+  # if NVIDIA MPS is requested, set the active thread percentage per job from how many jobs land
+  # on each GPU (this reads the slots, so it accounts for --slot as well as the automatic affinity).
+  # The NVIDIA MPS daemon default is raised to the maximum requested percentage so the per-client
+  # values are not clamped; nvidia_mps_session restores the previous default afterwards.
+  # The NVIDIA MPS control daemon itself is started/stopped by the caller.
+  nvidia_mps_pcts = nvidia_mps_slot_percentages(nvidia_mps, slots, gpus_nv)
+  if any(p is not None for p in nvidia_mps_pcts):
+    set_nvidia_mps_default_percentage(max(p for p in nvidia_mps_pcts if p is not None))
+    for slot, pct in zip(slots, nvidia_mps_pcts):
+      slot.nvidia_mps = pct
+    counts_by_pct = {}
+    for p in nvidia_mps_pcts:
+      if p is not None:
+        counts_by_pct[p] = counts_by_pct.get(p, 0) + 1
+    summary = ', '.join('%d job(s) @ %d%%' % (n, p) for p, n in sorted(counts_by_pct.items()))
+    print('Using NVIDIA MPS active thread percentage: ' + summary)
+    sys.stdout.flush()
 
   if debug_affinity:
     for job,slot in enumerate(slots):
@@ -1498,7 +1826,7 @@ def multiCmsRun(
         os.mkdir(jobdir)
         if daqdir is not None:
           if daqdir.startswith('/'):
-            os.makedirs(daqdir, exists_ok = True)
+            os.makedirs(daqdir, exist_ok = True)
           else:
             os.makedirs(os.path.join(jobdir, daqdir))
         job_threads[job] = singleCmsRun(
@@ -1594,7 +1922,7 @@ def multiCmsRun(
         os.mkdir(jobdir)
         if daqdir is not None:
           if daqdir.startswith('/'):
-            os.makedirs(daqdir, exists_ok = True)
+            os.makedirs(daqdir, exist_ok = True)
           else:
             os.makedirs(os.path.join(jobdir, daqdir))
         job_threads[job] = singleCmsRun(
@@ -1915,40 +2243,23 @@ if __name__ == "__main__":
   parser = OptionParser()
   opts = parser.parse(sys.argv[1:])
 
-  # restrict the visible GPUs (hltTiming.sh-style --gpus) and refresh the GPU detection, so the
-  # system overview, the affinity assignment and the monitoring all agree (benchmark and scan do
-  # the same). Accepts a plain list ("0,1") or a per-vendor form ("nvidia=0,1:amd=0").
+  # --no-nvidia-mps: never start NVIDIA MPS, and refuse to run if a control daemon is already active
+  if opts.no_nvidia_mps:
+    ensure_nvidia_mps_off()
+
+  # apply --gpus and refresh the GPU detection, so the system overview, the affinity assignment and
+  # the monitoring all agree. Accepts a plain list ("0,1") or a per-vendor form ("nvidia=0,1:amd=0").
   apply_gpu_selection(opts.gpus)
 
-  options = {
-    'verbose'             : opts.verbose,
-    'debug_logs'          : opts.debug_logs,
-    'plumbing'            : opts.plumbing,
-    'warmup'              : opts.warmup,
-    'events'              : opts.events,
-    'resolution'          : opts.event_resolution,
-    'skipevents'          : opts.event_skip,
-    'repeats'             : opts.repeats,
-    'jobs'                : opts.jobs,
-    'threads'             : opts.threads,
-    'streams'             : opts.streams,
-    'gpus_per_job'        : opts.gpus_per_job,
-    'allow_hyperthreading': opts.allow_hyperthreading,
-    'set_numa_affinity'   : opts.numa_affinity,
-    'set_cpu_affinity'    : opts.cpu_affinity,
-    'set_gpu_affinity'    : opts.gpu_affinity,
-    'slots'               : opts.slots,
-    'executable'          : opts.executable,
-    # no --logdir / --no-logdir means no logs; otherwise expand the --logdir template
-    'logdir'              : expand_logdir(opts.logdir, opts.configs[0], opts.jobs, opts.threads, opts.streams, opts.gpus_per_job, gpu_tag(opts.gpus)),
-    'tmpdir'              : opts.tmpdir,
-    'keep'                : opts.keep,
-    'host_memory_monitoring': HostMemoryInfo[opts.host_memory_monitoring.upper()],
-    'gpu_monitoring'        : GpuMonitorInfo[opts.gpu_monitoring.upper()],
-  }
+  # no --logdir / --no-logdir means no logs; otherwise expand the --logdir template
+  logdir = expand_logdir(opts.logdir, opts.configs[0], opts.jobs, opts.threads, opts.streams, opts.gpus_per_job, gpu_tag(opts.gpus), nvidia_mps_tag(opts.nvidia_mps, opts.jobs, opts.gpus_per_job, gpus_nv, opts.slots))
+  options = build_options(opts, opts.jobs, opts.threads, opts.streams, logdir = logdir)
 
   if options['verbose']:
     info()
 
   process = parseProcess(opts.configs[0])
-  multiCmsRun(process, **options)
+  # start the NVIDIA MPS control daemon if --nvidia-mps was requested (and an NVIDIA GPU will be used) and
+  # it is not already running, and stop it on exit only if it was started here
+  with nvidia_mps_session(use_nvidia_mps(opts.nvidia_mps, opts.gpus_per_job, opts.slots, opts.no_nvidia_mps)):
+    multiCmsRun(process, **options)

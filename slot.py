@@ -10,6 +10,7 @@ import sys
 #   - NUMA memory nodes, as understood by `numactl -m ...`
 #   - CPUs, as understood by `numactl -C ...`
 #   - NVIDIA GPUs, as understood by `CUDA_VISIBLE_DEVICES=...`
+#   - the NVIDIA MPS active thread percentage, as understood by `CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=...`
 #   - AMD GPUs, as understood by `HIP_VISIBLE_DEVICES=...`
 
 # Note: on a mixed system, setting CUDA_VISIBLE_DEVICES affects also the selection of AMD GPUs.
@@ -18,6 +19,9 @@ class Slot:
     # a single integer
     integer_format = '-?[0-9]+'
     integer_template = re.compile('^' + integer_format + '$')
+
+    # a percentage: a non-negative integer
+    percent_format = '[0-9]+'
 
     # a comma separated list of integers or integer ranges
     nodes_range = '[0-9]+(-[0-9]+)?'
@@ -39,10 +43,12 @@ class Slot:
     slot_format_cpu = '(cpus|cpu|c)=' + nodes_format
     # [gpu-nvidia|nv]=GPUS    where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the NVIDIA GPUs to be used by the job
     slot_format_gpu_nvidia = '(gpu-nvidia|nv)=(' + gpus_format + ')?'
+    # nvidia-mps=PERCENT      where PERCENT is a non-negative integer, the NVIDIA MPS active thread percentage to be used by the job
+    slot_format_nvidia_mps = 'nvidia-mps=' + percent_format
     # [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
     slot_format_gpu_amd = '(gpu-amd|amd)=(' + gpus_format + ')?'
     # any of the fields above
-    slot_format_field = f'({slot_format_events}|{slot_format_numa}|{slot_format_mem}|{slot_format_cpu}|{slot_format_gpu_nvidia}|{slot_format_gpu_amd})'
+    slot_format_field = f'({slot_format_events}|{slot_format_numa}|{slot_format_mem}|{slot_format_cpu}|{slot_format_gpu_nvidia}|{slot_format_nvidia_mps}|{slot_format_gpu_amd})'
     # a colon-separated list of fields
     slot_format = f'{slot_format_field}(:{slot_format_field})*'
     slot_template = re.compile('^' + slot_format + '$')
@@ -110,6 +116,23 @@ class Slot:
         return int(arg)
 
 
+    # parse an NVIDIA MPS active thread percentage (the --slot "nvidia-mps=" field), in the range 1-100;
+    # None or an empty string indicate no percentage is set.
+    @staticmethod
+    def parse_nvidia_mps(arg):
+        msg = 'The argument is expected to be None, or a string containing an integer.'
+        if not isinstance(arg, (type(None), str)):
+            raise TypeError(msg)
+        if not arg:
+            return None
+        if not Slot.integer_template.match(arg):
+            raise ValueError(msg)
+        pct = int(arg)
+        if pct < 1 or pct > 100:
+            raise ValueError('the NVIDIA MPS active thread percentage must be in the range 1-100, got %s' % arg)
+        return pct
+
+
     # parse an argument as an integer, or list of integers
     @staticmethod
     def parse_value(arg):
@@ -158,17 +181,20 @@ class Slot:
         return v
 
 
-    def __init__(self, events = None, numa_cpu = None, numa_mem = None, cpus = None, nvidia_gpus = None, amd_gpus = None):
+    def __init__(self, events = None, numa_cpu = None, numa_mem = None, cpus = None, nvidia_gpus = None, nvidia_mps = None, amd_gpus = None):
         self.events = Slot.parse_integer(events)
         self.numa_cpu = Slot.parse_value(numa_cpu)
         self.numa_mem = Slot.parse_value(numa_mem)
         self.cpus = Slot.parse_value(cpus)
         self.nvidia_gpus = Slot.parse_gpu_descriptor(nvidia_gpus)
+        # NVIDIA MPS active thread percentage for this job, or None; overwritten by multiCmsRun with
+        # the per-slot computed percentage
+        self.nvidia_mps = Slot.parse_nvidia_mps(nvidia_mps)
         self.amd_gpus = Slot.parse_gpu_descriptor(amd_gpus)
 
     def __str__(self):
         return ', '.join([f'{k}={v}' for k,v in vars(self).items() if v is not None])
-    
+
     # return "value" if "field=value" is given in arg, or None if field is not in arg
     @staticmethod
     def parse_field(arg, field):
@@ -192,6 +218,7 @@ class Slot:
         #   [mem|m]=NODES           where NODES is a comma-separated list of integer or integer ranges, representing the NUMA nodes of the memory to be used by the job
         #   [cpus|cpu|c]=CPUS       where CPUS is a comma-separated list of integer or integer ranges, representing the CPUs to be used by the job
         #   [gpu-nvidia|nv]=GPUS    where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the NVIDIA GPUs to be used by the job
+        #   nvidia-mps=PERCENT      where PERCENT is a non-negative integer, the NVIDIA MPS active thread percentage to be used by the job, and overrides the --nvidia-mps option for this slot
         #   [gpu-amd|amd]=GPUS      where GPUS is a comma-separated list of integer, integer ranges, or GPU UUIDs representing the AMD GPUs to be used by the job
         if not isinstance(arg, str):
             raise TypeError('The argument should be a string')
@@ -204,9 +231,12 @@ class Slot:
         numa_mem = Slot.parse_field(arg, ('mem', 'm'))
         cpus = Slot.parse_field(arg, ('cpus', 'cpu', 'c'))
         nvidia_gpus = Slot.parse_field(arg, ('gpu-nvidia', 'nv'))
+        nvidia_mps = Slot.parse_field(arg, ('nvidia-mps',))
         amd_gpus = Slot.parse_field(arg, ('gpu-amd', 'amd'))
 
-        return Slot(events, numa_cpu, numa_mem, cpus, nvidia_gpus, amd_gpus)
+        # pass by keyword, so that adding or reordering a field cannot silently shift the values
+        return Slot(events = events, numa_cpu = numa_cpu, numa_mem = numa_mem, cpus = cpus,
+                    nvidia_gpus = nvidia_gpus, nvidia_mps = nvidia_mps, amd_gpus = amd_gpus)
 
 
     # return the command prefix and environment for the execution environment described by the slot
@@ -224,6 +254,9 @@ class Slot:
 
         if self.nvidia_gpus is not None:
             environ['CUDA_VISIBLE_DEVICES'] = ','.join(self.nvidia_gpus)
+
+        if self.nvidia_mps is not None:
+            environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] = str(self.nvidia_mps)
 
         if self.amd_gpus is not None:
             environ['HIP_VISIBLE_DEVICES'] = ','.join(self.amd_gpus)
@@ -269,6 +302,9 @@ class Slot:
             desc.append('with the NVIDIA GPU ' + self.nvidia_gpus[0])
         else:
             desc.append('with the NVIDIA GPUs ' + ','.join(self.nvidia_gpus))
+
+        if self.nvidia_mps is not None:
+            desc.append(f'with NVIDIA MPS active thread percentage {self.nvidia_mps}%')
 
         if self.amd_gpus is None:
             desc.append('with any available AMD GPUs')

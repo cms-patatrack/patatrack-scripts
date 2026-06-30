@@ -21,7 +21,7 @@ from slot import Slot
 
 class Tee(object):
   # write to several streams at once, so the console output can be saved to a log file
-  # while still being shown live (like the "tee" used by the legacy hltTiming.sh wrapper)
+  # while still being shown live
   def __init__(self, *streams):
     self.streams = streams
   def write(self, data):
@@ -77,6 +77,10 @@ if __name__ == "__main__":
   parser = OptionParser()
   opts = parser.parse(sys.argv[1:])
 
+  # --no-nvidia-mps: never start NVIDIA MPS, and refuse to run if a control daemon is already active
+  if opts.no_nvidia_mps:
+    multirun.ensure_nvidia_mps_off()
+
   # apply --gpus and refresh the GPU detection, so the system overview, the affinity assignment and
   # the monitoring all agree. Accepts a plain list ("0,1") or a per-vendor form
   # ("nvidia=0,1:amd=0") for mixed nodes.
@@ -114,177 +118,179 @@ if __name__ == "__main__":
   used_logdirs = set()
   used_csvs = set()
 
-  for config in opts.configs:
-    # capture this configuration's preamble (the auto-generated input job report, if any) so it
-    # is prepended to its runs' output.log too
-    config_log = io.StringIO() if opts.output_log else None
-    if config_log is not None:
-      sys.stdout = Tee(real_stdout, config_log)
-    process = parseProcess(config)
-    stem = configStem(config)
+  # if --nvidia-mps was requested (and an NVIDIA GPU will be used), start the NVIDIA MPS control daemon
+  # (unless already running) for the whole session, and stop it at exit only if it was started here.
+  # The per-job active thread percentage is computed and applied inside multiCmsRun.
+  with nvidia_mps_session(multirun.use_nvidia_mps(opts.nvidia_mps, opts.gpus_per_job, opts.slots, opts.no_nvidia_mps)):
 
-    # the --gpus tag is constant across this configuration's setups; leave it empty when a GPU is
-    # not actually used -- no GPU on the node, -g 0, or the configuration restricting itself to the
-    # CPU (options.accelerators) -- so the optional %gpus placeholder drops out of the run name
-    gputag = multirun.gpu_tag(opts.gpus) if multirun.gpu_in_use(opts.gpus_per_job, process) else ''
+    for config in opts.configs:
+      # capture this configuration's preamble (the auto-generated input job report, if any) so it
+      # is prepended to its runs' output.log too
+      config_log = io.StringIO() if opts.output_log else None
+      if config_log is not None:
+        sys.stdout = Tee(real_stdout, config_log)
+      process = parseProcess(config)
+      stem = configStem(config)
 
-    # build the trimmed input-only process once per configuration: the input collections and the
-    # auto-generated job report depend only on the configuration, not on the jobs/threads/streams
-    # setup, so this avoids regenerating them (and re-running a short cmsRun) for every setup
-    io_process = None
-    if opts.input_benchmark:
-      collections = resolve_input_collections(config, opts.input_collections, opts.input_xml, opts.input_xml_events, opts.executable)
-      io_process = make_io_process(process, collections)
-    if config_log is not None:
-      sys.stdout = real_stdout
+      # the --gpus tag is constant across this configuration's setups; leave it (and the per-setup
+      # NVIDIA MPS tag below) empty when a GPU is not actually used -- no GPU on the node, -g 0, or the
+      # configuration restricting itself to the CPU (options.accelerators) -- so the optional
+      # %gpus/%mps placeholders drop out of the run name entirely
+      gputag = multirun.gpu_tag(opts.gpus) if multirun.gpu_in_use(opts.gpus_per_job, process) else ''
 
-    for (sjobs, sthreads, sstreams) in setups:
-      jobs, threads, streams = resolveJTS(sjobs, sthreads, sstreams, count)
+      # build the trimmed input-only process once per configuration: the input collections and the
+      # auto-generated job report depend only on the configuration, not on the jobs/threads/streams
+      # setup, so this avoids regenerating them (and re-running a short cmsRun) for every setup
+      io_process = None
+      if opts.input_benchmark:
+        collections = resolve_input_collections(config, opts.input_collections, opts.input_xml, opts.input_xml_events, opts.executable)
+        io_process = make_io_process(process, collections)
+      if config_log is not None:
+        sys.stdout = real_stdout
 
-      # per-run output directory: an empty logdir (--no-logdir or --logdir '') -> no logs; otherwise
-      # expand the template (with no --logdir or a bare --logdir, that is the default automatic one)
-      run_logdir = expand_logdir(opts.logdir, config, jobs, threads, streams, opts.gpus_per_job, gputag)
-      # per-run CSV file name: suffix it when running a matrix, to avoid overwriting. The suffix
-      # mirrors the automatic logdir naming (same fields and "_" separator); the optional GPU tag is
-      # appended only when it applies, so CPU-only runs get a clean name
-      if opts.csv and multi:
-        base, ext = os.path.splitext(opts.csv)
-        parts = [ stem, '%dj' % jobs, '%dt' % threads, '%ds' % streams ]
-        if gputag:
-          parts.append(gputag)
-        run_csv = base + '_' + '_'.join(parts) + ext
-      else:
-        run_csv = opts.csv
+      for (sjobs, sthreads, sstreams) in setups:
+        jobs, threads, streams = resolveJTS(sjobs, sthreads, sstreams, count)
 
-      # make the output names unique across the configs x setups matrix: if the same directory or
-      # CSV name comes up twice (e.g. a literal --logdir with no placeholders, or two configs with
-      # the same basename), append an incrementing suffix so runs do not clobber each other
-      if multi and run_logdir is not None:
-        run_logdir = unique_name(run_logdir, used_logdirs)
-      if multi and run_csv is not None:
-        run_csv = unique_name(run_csv, used_csvs, split_ext = True)
+        # the NVIDIA MPS tag depends on the resolved job count (a value-less --nvidia-mps splits each
+        # GPU among the jobs sharing it), so it is computed per setup; empty when no NVIDIA GPU is in use
+        nvidia_mpstag = multirun.nvidia_mps_tag(opts.nvidia_mps, jobs, opts.gpus_per_job, multirun.gpus_nv, opts.slots) \
+                        if multirun.nvidia_in_use(opts.gpus_per_job, process) else ''
 
-      # keep a copy of the configuration file in the log directory, so each run records what it ran
-      if run_logdir is not None:
-        os.makedirs(run_logdir, exist_ok = True)
-        shutil.copy(config, run_logdir)
+        # per-run output directory: an empty logdir (--no-logdir or --logdir '') -> no logs; otherwise
+        # expand the template (with no --logdir or a bare --logdir, that is the default automatic one)
+        run_logdir = expand_logdir(opts.logdir, config, jobs, threads, streams, opts.gpus_per_job, gputag, nvidia_mpstag)
+        # per-run CSV file name: suffix it when running a matrix, to avoid overwriting. The suffix
+        # mirrors the automatic logdir naming (same fields and "_" separator); the optional GPU/NVIDIA MPS
+        # tags are appended only when they apply, so CPU-only runs get a clean name
+        if opts.csv and multi:
+          base, ext = os.path.splitext(opts.csv)
+          parts = [ stem, '%dj' % jobs, '%dt' % threads, '%ds' % streams ]
+          if gputag:
+            parts.append(gputag)
+          if nvidia_mpstag:
+            parts.append(nvidia_mpstag)
+          run_csv = base + '_' + '_'.join(parts) + ext
+        else:
+          run_csv = opts.csv
 
-      data = open(run_csv, 'wt', buffering=1, encoding='utf-8') if run_csv else None
+        # make the output names unique across the configs x setups matrix: if the same directory or
+        # CSV name comes up twice (e.g. a literal --logdir with no placeholders, or two configs with
+        # the same basename), append an incrementing suffix so runs do not clobber each other
+        if multi and run_logdir is not None:
+          run_logdir = unique_name(run_logdir, used_logdirs)
+        if multi and run_csv is not None:
+          run_csv = unique_name(run_csv, used_csvs, split_ext = True)
 
-      # common options for multirun
-      options = {
-        'verbose'             : opts.verbose,
-        'plumbing'            : opts.plumbing,
-        'warmup'              : opts.warmup,
-        'events'              : opts.events,
-        'resolution'          : opts.event_resolution,
-        'skipevents'          : opts.event_skip,
-        'repeats'             : opts.repeats,
-        'wait'                : opts.wait,
-        'jobs'                : jobs,
-        'threads'             : threads,
-        'streams'             : streams,
-        'gpus_per_job'        : opts.gpus_per_job,
-        'allow_hyperthreading': opts.allow_hyperthreading,
-        'set_numa_affinity'   : opts.numa_affinity,
-        'set_cpu_affinity'    : opts.cpu_affinity,
-        'set_gpu_affinity'    : opts.gpu_affinity,
-        'slots'               : opts.slots,
-        'executable'          : opts.executable,
-        'data'                : data,
-        'header'              : opts.csvheader,
-        'logdir'              : run_logdir,
-        'tmpdir'              : opts.tmpdir,
-        'keep'                : opts.keep,
-        'automerge'           : opts.automerge,
-        'autodelete'          : opts.autodelete,
-        'autodelete_delay'    : opts.autodelete_delay,
-        'debug_cpu_usage'     : opts.debug_cpu_usage,
-        'debug_affinity'      : opts.debug_affinity,
-        'debug_logs'          : opts.debug_logs,
-        'host_memory_monitoring': HostMemoryInfo[opts.host_memory_monitoring.upper()],
-        'gpu_monitoring'        : GpuMonitorInfo[opts.gpu_monitoring.upper()],
-        'source_config'       : config,
-      }
+        # keep a copy of the configuration file in the log directory, so each run records what it ran
+        if run_logdir is not None:
+          os.makedirs(run_logdir, exist_ok = True)
+          shutil.copy(config, run_logdir)
 
-      # optionally save this run's console output to "<run_logdir>/output.log",
-      # while still showing it live (like the "tee" in the legacy hltTiming.sh wrapper)
-      saved_stdout = sys.stdout
-      output_log = None
-      if opts.output_log and run_logdir:
-        os.makedirs(run_logdir, exist_ok = True)
-        output_log = open(os.path.join(run_logdir, 'output.log'), 'w', buffering = 1, encoding = 'utf-8')
-        # prepend the captured preamble so output.log is a complete record (system overview and
-        # the input job report), not just from the I/O warm-up onward
-        output_log.write(header_log.getvalue())
-        output_log.write(config_log.getvalue())
-        sys.stdout = Tee(saved_stdout, output_log)
+        # open the per-run output files inside the try, so the finally below is the single place
+        # that closes them even if the log-directory setup or a measurement raises
+        saved_stdout = sys.stdout
+        data = None
+        output_log = None
+        ref_data = None
+        run_monitor = None
+        try:
+          data = open(run_csv, 'wt', buffering=1, encoding='utf-8') if run_csv else None
 
-      try:
-        # print configuration
-        if opts.verbose:
-          printCommonArgs(options)
+          # common options for multirun
+          options = build_options(opts, jobs, threads, streams, logdir = run_logdir, data = data, header = opts.csvheader)
+          # record, next to the copied original config, the fully-expanded dump multiCmsRun actually
+          # runs; multiCmsRun writes it as "<config-stem>_dump.py" once the per-setup customisations
+          # are applied (only when it has a logdir, so the input-only warm-up run does not)
+          options['source_config'] = config
 
-        if multi:
-          print('=== Configuration %s with %d jobs, %d threads, %d streams ===' % (config, jobs, threads, streams))
+          # one resource monitor spanning every phase of this run (I/O warm-up through the last
+          # repetition), so <logdir>/cpu_monitor.csv and gpu_monitor.csv form a single continuous
+          # series; it is flushed in the finally so an interrupt still leaves what was collected.
+          # Returns None (each run then uses its own monitor) for indefinite runs or when nothing
+          # can be surfaced.
+          run_monitor = multirun.start_run_monitor(options['gpu_monitoring'], opts.plumbing, run_logdir, opts.repeats)
 
-        if opts.input_benchmark:
-          # benchmark reading the input data; do not monitor this throwaway I/O-only run
-          print('Benchmarking only the input')
-          io_options = dict(options, repeats = opts.input_benchmark, logdir = None, keep = [], data = None, gpu_monitoring = GpuMonitorInfo.NONE)
-          multiCmsRun(io_process, **io_options)
-          print()
-          # wait the required number of seconds between the I/O benchmark and the actual measurement
-          if opts.wait > 0:
-            time.sleep(opts.wait)
+          # optionally save this run's console output to "<run_logdir>/output.log", while still
+          # showing it live
+          if opts.output_log and run_logdir:
+            os.makedirs(run_logdir, exist_ok = True)
+            output_log = open(os.path.join(run_logdir, 'output.log'), 'w', buffering = 1, encoding = 'utf-8')
+            # prepend the captured preamble so output.log is a complete record (system overview and
+            # the input job report), not just from the I/O warm-up onward
+            output_log.write(header_log.getvalue())
+            output_log.write(config_log.getvalue())
+            sys.stdout = Tee(saved_stdout, output_log)
 
-        if opts.reference_benchmark:
-          # benchmark the same configuration using the reference CMSSW release
-          if 'CMSSW_RELEASE_BASE' in os.environ:
-            # query scram for the reference release environment
-            release_base = os.environ['CMSSW_RELEASE_BASE']
-            variables = subprocess.Popen(['scram', 'runtime', '-sh'], cwd=release_base, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).communicate()[0].splitlines()
-            # make a copy of the environment and update it
-            environ = copy.deepcopy(os.environ)
-            export = re.compile(r'export +(\w+)="(.*)";?')
-            unset = re.compile(r'unset +((\w| )+);?')
-            for line in variables:
-              # set or update environment variables
-              matches = export.match(line)
-              if matches:
-                name = matches[1]
-                value = matches[2]
-                environ[name] = value
-              # unset environment variables
-              matches = unset.match(line)
-              if matches:
-                names = matches[1].split()
-                for name in names:
-                  if name in environ:
-                    del environ[name]
-            # run the benchmark with the modified environment
-            print('Benchmarking %s with the reference release at %s' % (config, release_base))
-            ref_logdir = run_logdir + '_reference' if run_logdir else None
-            if run_csv:
-                name, ext = os.path.splitext(run_csv)
-                ref_data = open(name + '_reference' + ext, 'wt', buffering=1, encoding='utf-8')
-            else:
-                ref_data = None
-            ref_options = dict(options, logdir = ref_logdir, data = ref_data, environ = environ)
-            multiCmsRun(process, **ref_options)
-            if ref_data:
-              ref_data.close()
+          # print configuration
+          if opts.verbose:
+            printCommonArgs(options)
+
+          if multi:
+            print('=== Configuration %s with %d jobs, %d threads, %d streams ===' % (config, jobs, threads, streams))
+
+          if opts.input_benchmark:
+            # benchmark reading the input data; it has no logdir of its own, but the shared run
+            # monitor keeps sampling so the I/O phase appears in the continuous top-level CSVs. When
+            # there is no shared monitor (indefinite / not surfaceable) it stays an unmonitored run
+            print('Benchmarking only the input')
+            io_options = dict(options, repeats = opts.input_benchmark, logdir = None, keep = [], data = None,
+                              monitor = run_monitor,
+                              gpu_monitoring = run_monitor.level if run_monitor else GpuMonitorInfo.NONE)
+            multiCmsRun(io_process, **io_options)
             print()
-          else:
-            print('$CMSSW_RELEASE_BASE is not set, cannot benchmark the reference release')
-          print()
+            # wait the required number of seconds between the I/O benchmark and the actual measurement
+            if opts.wait > 0:
+              time.sleep(opts.wait)
 
-        print('Benchmarking %s' % config)
-        multiCmsRun(process, **options)
-      finally:
-        # restore stdout and close the per-run output files
-        sys.stdout = saved_stdout
-        if output_log:
-          output_log.close()
-        if data:
-          data.close()
+          if opts.reference_benchmark:
+            # benchmark the same configuration using the reference CMSSW release
+            if 'CMSSW_RELEASE_BASE' in os.environ:
+              # query scram for the reference release environment
+              release_base = os.environ['CMSSW_RELEASE_BASE']
+              variables = subprocess.Popen(['scram', 'runtime', '-sh'], cwd=release_base, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).communicate()[0].splitlines()
+              # make a copy of the environment and update it
+              environ = copy.deepcopy(os.environ)
+              export = re.compile(r'export +(\w+)="(.*)";?')
+              unset = re.compile(r'unset +((\w| )+);?')
+              for line in variables:
+                # set or update environment variables
+                matches = export.match(line)
+                if matches:
+                  name = matches[1]
+                  value = matches[2]
+                  environ[name] = value
+                # unset environment variables
+                matches = unset.match(line)
+                if matches:
+                  names = matches[1].split()
+                  for name in names:
+                    if name in environ:
+                      del environ[name]
+              # run the benchmark with the modified environment
+              print('Benchmarking %s with the reference release at %s' % (config, release_base))
+              ref_logdir = run_logdir + '_reference' if run_logdir else None
+              if run_csv:
+                  name, ext = os.path.splitext(run_csv)
+                  ref_data = open(name + '_reference' + ext, 'wt', buffering=1, encoding='utf-8')
+              else:
+                  ref_data = None
+              ref_options = dict(options, logdir = ref_logdir, data = ref_data, environ = environ, monitor = run_monitor)
+              multiCmsRun(process, **ref_options)
+              print()
+            else:
+              print('$CMSSW_RELEASE_BASE is not set, cannot benchmark the reference release')
+            print()
+
+          print('Benchmarking %s' % config)
+          multiCmsRun(process, **dict(options, monitor = run_monitor))
+        finally:
+          # flush the shared run monitor (continuous top-level CSVs + summary) while stdout is still
+          # tee'd to output.log, then restore stdout and close the per-run output files
+          multirun.finish_run_monitor(run_monitor, run_logdir, opts.plumbing)
+          sys.stdout = saved_stdout
+          if output_log:
+            output_log.close()
+          if data:
+            data.close()
+          if ref_data:
+            ref_data.close()

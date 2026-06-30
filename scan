@@ -84,6 +84,18 @@ Selected Configuration:
 if __name__ == "__main__":
   opts = parseArguments()
 
+  # scan sweeps a single configuration over a range of thread counts; the shared parser accepts
+  # several configs (for benchmark's matrix), so reject the extra ones here rather than silently
+  # ignoring all but the first
+  if len(opts.configs) > 1:
+    sys.stderr.write('%s: error: scan operates on a single configuration, but %d were given: %s\n'
+                     % (sys.argv[0], len(opts.configs), ' '.join(opts.configs)))
+    sys.exit(1)
+
+  # --no-nvidia-mps: never start NVIDIA MPS, and refuse to run if a control daemon is already active
+  if opts.no_nvidia_mps:
+    multirun.ensure_nvidia_mps_off()
+
   # apply --gpus; accepts a plain list ("0,1") or a per-vendor form ("nvidia=0,1:amd=0") for
   # mixed nodes
   multirun.apply_gpu_selection(opts.gpus)
@@ -91,41 +103,12 @@ if __name__ == "__main__":
   config = opts.configs[0]
   process = parseProcess(config)
 
-  # common options for multirun
-  options = {
-    'verbose'             : opts.verbose,
-    'plumbing'            : opts.plumbing,
-    'warmup'              : opts.warmup,
-    'events'              : opts.events,
-    'resolution'          : opts.event_resolution,
-    'skipevents'          : opts.event_skip,
-    'repeats'             : opts.repeats,
-    'wait'                : opts.wait,
-    'jobs'                : opts.jobs,
-    'threads'             : opts.threads,
-    'streams'             : opts.streams,
-    'gpus_per_job'        : opts.gpus_per_job,
-    'allow_hyperthreading': opts.allow_hyperthreading,
-    'set_numa_affinity'   : opts.numa_affinity,
-    'set_cpu_affinity'    : opts.cpu_affinity,
-    'set_gpu_affinity'    : opts.gpu_affinity,
-    'slots'               : opts.slots,
-    'executable'          : opts.executable,
-    'data'                : open(opts.csv, 'wt', buffering=1, encoding='utf-8') if opts.csv else None,
-    'header'              : opts.csvheader,
-    # the per-step log directory is computed from the --logdir template inside the loop below
-    'logdir'              : None,
-    'tmpdir'              : opts.tmpdir,
-    'keep'                : opts.keep,
-    'automerge'           : opts.automerge,
-    'autodelete'          : opts.autodelete,
-    'autodelete_delay'    : opts.autodelete_delay,
-    'debug_cpu_usage'     : opts.debug_cpu_usage,
-    'debug_affinity'      : opts.debug_affinity,
-    'debug_logs'          : opts.debug_logs,
-    'host_memory_monitoring': HostMemoryInfo[opts.host_memory_monitoring.upper()],
-    'gpu_monitoring'        : GpuMonitorInfo[opts.gpu_monitoring.upper()],
-  }
+  # common options for multirun; the per-step log directory is computed from the --logdir template
+  # inside the loop below
+  options = build_options(opts, opts.jobs, opts.threads, opts.streams,
+                          logdir = None,
+                          data = open(opts.csv, 'wt', buffering=1, encoding='utf-8') if opts.csv else None,
+                          header = opts.csvheader)
 
   # print a system overview
   info()
@@ -159,68 +142,79 @@ if __name__ == "__main__":
   # make a copy of the options to be updated during the scan
   step_opt = dict(options)
 
-  # do not wait before the first step
-  wait = False
+  # if --nvidia-mps was requested (and an NVIDIA GPU will be used), start the NVIDIA MPS control daemon
+  # (unless already running) for the whole scan, and stop it at exit only if it was started here
+  with nvidia_mps_session(multirun.use_nvidia_mps(opts.nvidia_mps, opts.gpus_per_job, opts.slots, opts.no_nvidia_mps)):
+    try:
 
-  # the --gpus tag is constant across the scan; empty (dropping the optional %gpus placeholder) when
-  # no GPU is in use -- no GPU on the node, -g 0, or a CPU-only config
-  gputag = multirun.gpu_tag(opts.gpus) if multirun.gpu_in_use(opts.gpus_per_job, process) else ''
+      # do not wait before the first step
+      wait = False
 
-  for step in steps:
-    # update the options for each step
-    step_opt['threads'] = options['threads'] if options['threads'] is not None else step
-    step_opt['streams'] = options['streams'] if options['streams'] is not None else step
-    step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
+      # the --gpus tag is constant across the scan, so compute it once; empty (dropping the optional
+      # %gpus placeholder) when no GPU is in use -- no GPU on the node, -g 0, or a CPU-only config
+      gputag = multirun.gpu_tag(opts.gpus) if multirun.gpu_in_use(opts.gpus_per_job, process) else ''
 
-    # per-step log directory from the --logdir template; an empty logdir (--no-logdir or --logdir
-    # '') means no logs, while no --logdir or a bare --logdir uses the default template. A separate
-    # scan_<step> subdir keeps the steps apart unless the template already varies per step (via %t/%s/%j).
-    if opts.logdir:
-        base = expand_logdir(opts.logdir, config, step_opt['jobs'], step_opt['threads'], step_opt['streams'], opts.gpus_per_job, gputag)
-        if not any(p in opts.logdir for p in ('%t', '%s', '%j')):
-            base = base.rstrip('/') + '/scan_%d' % step
-        step_opt['logdir'] = base
-    else:
-        step_opt['logdir'] = None
+      for step in steps:
+        # update the options for each step
+        step_opt['threads'] = options['threads'] if options['threads'] is not None else step
+        step_opt['streams'] = options['streams'] if options['streams'] is not None else step
+        step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
 
-    # update the number of events to process based on the number of threads
-    if opts.events_extra_per_thread > 0:
-        step_opt['events'] = options['events'] + opts.events_extra_per_thread * step_opt['threads']
+        # the NVIDIA MPS tag depends on the step's job count (a value-less --nvidia-mps splits each
+        # GPU among the jobs sharing it), so it is computed per step; empty when no NVIDIA GPU is in use
+        nvidia_mpstag = multirun.nvidia_mps_tag(opts.nvidia_mps, step_opt['jobs'], opts.gpus_per_job, multirun.gpus_nv, opts.slots) \
+                        if multirun.nvidia_in_use(opts.gpus_per_job, process) else ''
 
-    if opts.events_limit > 0:
-        if step_opt['events'] > opts.events_limit:
-            step_opt['events'] = opts.events_limit
+        # per-step log directory from the --logdir template; an empty logdir (--no-logdir or --logdir
+        # '') means no logs, while no --logdir or a bare --logdir uses the default template. A separate
+        # scan_<step> subdir keeps the steps apart unless the template already varies per step (via %t/%s/%j).
+        if opts.logdir:
+            base = expand_logdir(opts.logdir, config, step_opt['jobs'], step_opt['threads'], step_opt['streams'], opts.gpus_per_job, gputag, nvidia_mpstag)
+            if not any(p in opts.logdir for p in ('%t', '%s', '%j')):
+                base = base.rstrip('/') + '/scan_%d' % step
+            step_opt['logdir'] = base
+        else:
+            step_opt['logdir'] = None
 
-    # print configuration
-    if opts.verbose:
-      printCommonArgs(step_opt)
+        # update the number of events to process based on the number of threads
+        if opts.events_extra_per_thread > 0:
+            step_opt['events'] = options['events'] + opts.events_extra_per_thread * step_opt['threads']
+
+        if opts.events_limit > 0:
+            if step_opt['events'] > opts.events_limit:
+                step_opt['events'] = opts.events_limit
+
+        # print configuration
+        if opts.verbose:
+          printCommonArgs(step_opt)
       
-    # benchmark reading the input data; do not monitor this throwaway I/O-only run
-    if opts.input_benchmark:
-      print('Benchmarking only the input')
-      io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None, gpu_monitoring = GpuMonitorInfo.NONE)
-      multiCmsRun(io_process, **io_options)
-      print()
-      # schedule a wait after the I/O benchmark
-      if opts.wait > 0:
-        wait = True
+        # benchmark reading the input data; do not monitor this throwaway I/O-only run
+        if opts.input_benchmark:
+          print('Benchmarking only the input')
+          io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None, gpu_monitoring = GpuMonitorInfo.NONE)
+          multiCmsRun(io_process, **io_options)
+          print()
+          # schedule a wait after the I/O benchmark
+          if opts.wait > 0:
+            wait = True
 
-    # wait the required number of seconds afer the I/O benchmark and between each iteration
-    if wait:
-      time.sleep(opts.wait)
+        # wait the required number of seconds afer the I/O benchmark and between each iteration
+        if wait:
+          time.sleep(opts.wait)
 
-    # run
-    multiCmsRun(process, **step_opt)
-    # schedule a wait between each iteration
-    if opts.wait > 0:
-      wait = True
-    # if the input files do not depend on the job configuration, warm up only once
-    if opts.events_extra_per_thread == 0:
-        step_opt['warmup'] = False
+        # run
+        multiCmsRun(process, **step_opt)
+        # schedule a wait between each iteration
+        if opts.wait > 0:
+          wait = True
+        # if the input files do not depend on the job configuration, warm up only once
+        if opts.events_extra_per_thread == 0:
+            step_opt['warmup'] = False
 
-    # print the CSV header only once
-    step_opt['header'] = False
+        # print the CSV header only once
+        step_opt['header'] = False
 
-  # close the CSV file
-  if options['data']:
-    options['data'].close()
+    finally:
+      # close the CSV file
+      if options['data']:
+        options['data'].close()

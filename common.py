@@ -51,8 +51,7 @@ def generate_job_report(config, events = 10, executable = 'cmsRun', environ = No
     (jobReport.xml) describing the input collections that are read, and return
     the path to the generated XML file.
 
-    This reproduces the manual step performed by the legacy hltTiming.sh wrapper:
-    copy the configuration, force a small number of events, and run it with the
+    Copy the configuration, force a small number of events, and run it with the
     "-j" option to capture the ReadBranches of the input data.
     """
     import atexit

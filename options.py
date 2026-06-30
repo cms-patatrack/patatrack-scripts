@@ -4,10 +4,10 @@ import argparse
 from slot import Slot
 
 # default --logdir template, used when logs are enabled without an explicit directory (no --logdir,
-# or a bare --logdir). It expands to a per-run name like "logs_<config>_<J>j_<T>t_<S>s[_<gpus>]"
-# (%gpus drops out when it does not apply); multirun.expand_logdir does the expansion, and
+# or a bare --logdir). It expands to a per-run name like "logs_<config>_<J>j_<T>t_<S>s[_<gpus>][_<mps>]"
+# (the last two drop out when they do not apply); multirun.expand_logdir does the expansion, and
 # logdir_placeholders below documents the names. Pass --no-logdir (or --logdir '') to disable logs.
-default_logdir_template = 'logs_%config_%jj_%tt_%ss_%gpus'
+default_logdir_template = 'logs_%config_%jj_%tt_%ss_%gpus_%mps'
 
 def configStem(config):
     # derive a short configuration name, e.g. "gpu_config.py" -> "gpu", "step3.py" -> "step3"
@@ -21,8 +21,8 @@ def configStem(config):
 # --logdir template placeholders: the single source of truth for both the "LOGDIR TEMPLATE" --help
 # section and multirun.expand_logdir. Each entry is (name, description, render), where render(params)
 # builds the placeholder's value from a run-parameter dict (keys: config, jobs, threads, streams,
-# gpus_per_job, gpu_tag). %gpus is optional: an empty value drops the placeholder (and its adjacent
-# separator) from the directory name.
+# gpus_per_job, gpu_tag, nvidia_mps_tag). %gpus and %mps are optional: an empty value drops the
+# placeholder (and its adjacent separator) from the directory name.
 logdir_placeholders = [
     ('config', 'the configuration name (basename without ".py" or a trailing "_config", e.g. "gpu")',
                lambda p: configStem(p['config'])),
@@ -32,6 +32,8 @@ logdir_placeholders = [
     ('gpj',    'the number of GPUs per job (the -g/--gpus-per-job value)', lambda p: str(p['gpus_per_job'])),
     ('gpus',   'the --gpus selection tag ("allGPUs", or e.g. "gpu01"); dropped when no GPU is used',
                lambda p: p['gpu_tag']),
+    ('mps',    'the --nvidia-mps tag ("noMPS", or e.g. "MPS50" / "MPS25-33"); dropped unless an NVIDIA GPU is used',
+               lambda p: p['nvidia_mps_tag']),
 ]
 
 def logdir_template_help():
@@ -49,19 +51,11 @@ def logdir_template_help():
     lines += [
         '',
         'A placeholder may be followed by literal text, e.g. "%jj" expands to "<jobs>j".',
-        'The %gpus placeholder is optional: when it does not apply (no GPU in use) it expands to',
-        'nothing and its adjacent separator is removed, so the directory name has no dangling',
-        'separator. Pass --no-logdir (or --logdir "") to disable logs.',
+        'The %gpus and %mps placeholders are optional: when they do not apply (no GPU in use, or no',
+        'NVIDIA GPU for %mps) they expand to nothing and their adjacent separator is removed, so the',
+        'directory name has no dangling separator. Pass --no-logdir (or --logdir "") to disable logs.',
     ]
     return '\n'.join(lines)
-
-def _config_like_hint(value):
-    # if a value that should be numeric looks like a configuration file, the variadic option has
-    # most likely swallowed the positional config; point the user at the "--" separator
-    if value.endswith('.py') or '/' in value:
-        return ' (this looks like a configuration file: place the config files after "--", ' \
-               'e.g. "--setup j=J,t=T,s=S -- config.py")'
-    return ''
 
 # named option presets, applied as defaults by "--preset NAME" (see OptionParser.parse).
 # To add a new preset, add an entry here: 'description' is shown in --help, and 'options' maps
@@ -100,6 +94,14 @@ presets = {
     },
 }
 
+def _config_like_hint(value):
+    # if a value that should be numeric looks like a configuration file, the variadic option has
+    # most likely swallowed the positional config; point the user at the "--" separator
+    if value.endswith('.py') or '/' in value:
+        return ' (this looks like a configuration file: place the config files after "--", ' \
+               'e.g. "--setup j=J,t=T,s=S -- config.py")'
+    return ''
+
 def parse_setup(value):
     # parse an explicit "j=J,t=T,s=S" preset into a (jobs, threads, streams) tuple. The fields may be
     # given in any order, using the keys j/t/s (or the long aliases jobs/threads/streams), and any
@@ -131,6 +133,17 @@ def parse_setup(value):
             raise argparse.ArgumentTypeError('the setup values must be integers, as in "j=J,t=T,s=S"' + _config_like_hint(value))
     return (result['jobs'], result['threads'], result['streams'])
 
+def parse_nvidia_mps(value):
+    # parse the --nvidia-mps percentage as an integer in the range 1-100; the bare "--nvidia-mps"
+    # (const=-1, auto-split) bypasses this parser.
+    try:
+        pct = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError('--nvidia-mps expects an integer percentage' + _config_like_hint(value))
+    if pct < 1 or pct > 100:
+        raise argparse.ArgumentTypeError('--nvidia-mps percentage must be in the range 1-100, got %s' % value)
+    return pct
+
 def printCommonArgs(opts):
     print('Common options for multiCmsRun:')
     for key, value in opts.items():
@@ -154,7 +167,7 @@ Run multiple cmsRun jobs in parallel with a configurable number of threads, stre
             epilog = """
 JOB SLOTS
 
-The execution environment for each job (NUMA nodes for the cpus, NUMA nodes for the memory, individual cpus, NVIDIA and AMD GPUs) can be given explicitly with the '--slot SLOT' option.
+The execution environment for each job (NUMA nodes for the cpus, NUMA nodes for the memory, individual cpus, NVIDIA and AMD GPUs, NVIDIA MPS active thread percentage) can be given explicitly with the '--slot SLOT' option.
 This options disables the automatic job assignment to CPUs and GPUs, and makes the program ignore the options '--numa-affinity', '--cpu-affinity' and '--gpu-affinity'.
 Each '--slot' option describes the execution environment for a single job. If theare more jobs (see the --jobs option) than slots, they are reused in a round-robin fashion until all jobs are allocated.
 The format of SLOT is a colon-separated list of fields, where each field has the format 'keyword=value'.
@@ -164,6 +177,7 @@ The possible fields, their formats and descriptions are:
    [mem|m]=NODES            where NODES indicates the NUMA nodes of the memory to be used by the job;
    [cpu|c]=CPUS             where CPUS indicates the individual CPUs to be used by the job;
    [gpu-nvidia|nv]=GPUS     where GPUS indicates the NVIDIA GPUs to be used by the job;
+   nvidia-mps=PERCENT       where PERCENT indicates the NVIDIA MPS active thread percentage to be used by the job;
    [gpu-amd|amd]=GPUS       where GPUS indicates the AMD GPUs to be used by the job.
 
 All fields are optional, but at least one field must be given. Each field should be specified at most once.
@@ -178,6 +192,9 @@ GPUS should be a comma-separated list of integers, integer ranges, or GPU UUIDs 
 If not specified, no restrictions on the GPUs are applied.
 If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
 
+PERCENT should be a non-negative integer, the NVIDIA MPS active thread percentage to be applied to the job.
+It overrides the '--nvidia-mps' option for this slot, and implies it: the NVIDIA MPS control daemon is started even if '--nvidia-mps' was not given.
+Slots that do not specify it follow '--nvidia-mps' as usual, or use no NVIDIA MPS if it was not given.
 
 """ + logdir_template_help())
 
@@ -299,6 +316,27 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
                    'configuration, e.g. --setup j=16,t=16,s=16 j=32,t=8,s=8. Fields may be given in '
                    'any order and any omitted field is auto-derived. Overrides -j/-t/-s and runs the '
                    'full configurations x setups matrix [default: none]')
+
+        group = self.parser.add_mutually_exclusive_group()
+        group.add_argument('--nvidia-mps',
+            dest = 'nvidia_mps',
+            metavar = 'PERCENT',
+            nargs = '?',
+            type = parse_nvidia_mps,
+            const = -1,
+            default = None,
+            help = 'use NVIDIA MPS: start the NVIDIA MPS control daemon if it is not already running, and '
+                   'set the active thread percentage of each job to PERCENT, an integer in the range 1-100 '
+                   '(inclusive). If PERCENT is omitted it defaults to ceil(100 / (jobs per GPU)). If the '
+                   'daemon was started here it is stopped at the end, otherwise it is left running. '
+                   '[default: NVIDIA MPS not used]')
+        group.add_argument('--no-nvidia-mps',
+            dest = 'no_nvidia_mps',
+            action = 'store_true',
+            default = False,
+            help = 'require NVIDIA MPS to be off: do not start the NVIDIA MPS control daemon, and exit with '
+                   'a clear error if one is already running (so a pre-existing daemon cannot silently affect '
+                   'the benchmark). [default: NVIDIA MPS not used, but a pre-existing daemon is left alone]')
 
         group = self.parser.add_mutually_exclusive_group()
         group.add_argument('--input-benchmark', '--run-io-benchmark',
@@ -560,6 +598,15 @@ If an empty list is used, all GPUs are disabled and no GPUs are used by the job.
             options.numa_affinity = False
             options.cpu_affinity = False
             options.gpu_affinity = False
+
+        # --no-nvidia-mps overrides any "nvidia-mps=" field in --slot: drop those percentages, so that
+        # neither the per-job CUDA_MPS_ACTIVE_THREAD_PERCENTAGE nor the %mps tag claims one
+        if options.no_nvidia_mps and any(slot.nvidia_mps is not None for slot in options.slots):
+            print('Warning: --no-nvidia-mps was given, but a --slot "nvidia-mps=" field requests NVIDIA MPS; '
+                  'not starting the NVIDIA MPS control daemon (the slot setting is ignored).')
+            sys.stdout.flush()
+            for slot in options.slots:
+                slot.nvidia_mps = None
 
         # check if profiling is supported
         if options.debug_cpu_usage:
