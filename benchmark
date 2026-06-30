@@ -3,6 +3,8 @@
 import sys
 import os
 import copy
+import io
+import shutil
 import subprocess
 
 # check that CMSSW_BASE is set
@@ -14,148 +16,276 @@ if not 'CMSSW_BASE' in os.environ:
 import FWCore.ParameterSet.Config as cms
 
 # local packages
+import multirun
 from common import *
-from options import OptionParser, printCommonArgs
+from options import OptionParser, printCommonArgs, configStem
 from multirun import *
 from slot import Slot
+
+class Tee(object):
+  # write to several streams at once, so the console output can be saved to a log file
+  # while still being shown live (like the "tee" used by the legacy hltTiming.sh wrapper)
+  def __init__(self, *streams):
+    self.streams = streams
+  def write(self, data):
+    for stream in self.streams:
+      stream.write(data)
+  def flush(self):
+    for stream in self.streams:
+      stream.flush()
+  @property
+  def encoding(self):
+    # forward sys.stdout.encoding so code that queries it (e.g. decoding subprocess output on a
+    # failed merge) keeps working while stdout is teed to a log file
+    return getattr(self.streams[0], 'encoding', None)
+  def isatty(self):
+    return getattr(self.streams[0], 'isatty', lambda: False)()
+
+
+def resolveJTS(jobs, threads, streams, count):
+  # resolve the number of jobs/threads/streams, autodetermining the unspecified one
+  if threads is None and jobs is None:
+    sys.stderr.write('%s: error: either the number of jobs or the number of threads per job must be specified\n' % sys.argv[0])
+    sys.exit(1)
+  elif threads is None:
+    threads = count // jobs
+  elif jobs is None:
+    jobs = count // threads
+  # the number of streams defaults to the number of threads per job
+  if streams is None:
+    streams = threads
+  return jobs, threads, streams
+
+
+def unique_name(name, used, split_ext = False):
+  # return `name` if it is not in `used`, otherwise the first "<name>_N" (with the suffix inserted
+  # before the extension when split_ext) that is free; the chosen name is recorded in `used` so a
+  # later call cannot pick it again (a generated suffix is reserved just like an original name)
+  candidate = name
+  n = 0
+  while candidate in used:
+    n += 1
+    if split_ext:
+      base, ext = os.path.splitext(name)
+      candidate = '%s_%d%s' % (base, n, ext)
+    else:
+      candidate = '%s_%d' % (name, n)
+  used.add(candidate)
+  return candidate
+
+
+
 
 if __name__ == "__main__":
   parser = OptionParser()
   opts = parser.parse(sys.argv[1:])
 
-  # common options for multirun
-  options = {
-    'verbose'             : opts.verbose,
-    'plumbing'            : opts.plumbing,
-    'warmup'              : opts.warmup,
-    'events'              : opts.events,
-    'resolution'          : opts.event_resolution,
-    'skipevents'          : opts.event_skip,
-    'repeats'             : opts.repeats,
-    'wait'                : opts.wait,
-    'jobs'                : opts.jobs,
-    'threads'             : opts.threads,
-    'streams'             : opts.streams,
-    'gpus_per_job'        : opts.gpus_per_job,
-    'allow_hyperthreading': opts.allow_hyperthreading,
-    'set_numa_affinity'   : opts.numa_affinity,
-    'set_cpu_affinity'    : opts.cpu_affinity,
-    'set_gpu_affinity'    : opts.gpu_affinity,
-    'slots'               : opts.slots,
-    'executable'          : opts.executable,
-    'data'                : open(opts.csv, 'wt', buffering=1, encoding='utf-8') if opts.csv else None,
-    'header'              : opts.csvheader,
-    'logdir'              : opts.logdir if opts.logdir else None,
-    'tmpdir'              : opts.tmpdir,
-    'keep'                : opts.keep,
-    'automerge'           : opts.automerge,
-    'autodelete'          : opts.autodelete,
-    'autodelete_delay'    : opts.autodelete_delay,
-    'debug_cpu_usage'     : opts.debug_cpu_usage,
-    'debug_affinity'      : opts.debug_affinity,
-    'debug_logs'          : opts.debug_logs,
-  }
+  # apply --gpus and refresh the GPU detection, so the system overview, the affinity assignment and
+  # the monitoring all agree. Accepts a plain list ("0,1") or a per-vendor form
+  # ("nvidia=0,1:amd=0") for mixed nodes.
+  multirun.apply_gpu_selection(opts.gpus)
+
+  # when saving each run's console output, capture the shared preamble (the system overview, and per
+  # configuration the auto-generated input job report) so it can be prepended to output.log
+  real_stdout = sys.stdout
+  header_log = io.StringIO() if opts.output_log else None
+  if header_log is not None:
+    sys.stdout = Tee(real_stdout, header_log)
 
   # print a system overview
   info()
 
+  if header_log is not None:
+    sys.stdout = real_stdout
+
   # check the available cpus
   cpus = get_cpu_info()
-  if options['allow_hyperthreading']:
+  if opts.allow_hyperthreading:
     count = sum(len(cpu.hardware_threads) for cpu in cpus.values())
   else:
     count = sum(len(cpu.physical_processors) for cpu in cpus.values())
 
-  # autodetermine either the number of jobs ot the nuber of threads per job
-  if options['threads'] is None and options['jobs'] is None:
-    sys.stderr.write('%s: error: either the number of jobs ot the nuber of threads per job must be specified\n' % sys.argv[0])
-  elif options['threads'] is None:
-    options['threads'] = count // options['jobs']
-  elif options['jobs'] is None:
-    options['jobs'] = count // options['threads']
+  # build the list of (jobs, threads, streams) setups to run for each configuration
+  setups = list(opts.setup) if opts.setup else [ (opts.jobs, opts.threads, opts.streams) ]
 
-  # the number of streams defaults to the number of threads per job
-  if options['streams'] is None:
-    options['streams'] = options['threads']
+  # whether more than one run will be performed (multiple configs and/or setups)
+  multi = len(opts.configs) > 1 or len(setups) > 1
 
-  process = parseProcess(opts.config)
+  # track the output names already used, so matrix runs never overwrite one another when the
+  # --logdir template has no per-run placeholders, or when two configs share a basename (and thus
+  # the same configStem); on collision an incrementing suffix is appended (see unique_name)
+  used_logdirs = set()
+  used_csvs = set()
 
-  # print configuration
-  if opts.verbose:
-    printCommonArgs(options)
-    
-  if opts.input_benchmark:
-    collections = opts.input_collections.split(',')
+  for config in opts.configs:
+    # capture this configuration's preamble (the auto-generated input job report, if any) so it
+    # is prepended to its runs' output.log too
+    config_log = io.StringIO() if opts.output_log else None
+    if config_log is not None:
+      sys.stdout = Tee(real_stdout, config_log)
+    process = parseProcess(config)
+    stem = configStem(config)
 
-    # read the list of input collections from the ReadBranches of a framework job report
-    if opts.input_xml:
-        collections = get_read_branch_names(opts.input_xml)
+    # the --gpus tag is constant across this configuration's setups; leave it empty when a GPU is
+    # not actually used -- no GPU on the node, -g 0, or the configuration restricting itself to the
+    # CPU (options.accelerators) -- so the optional %gpus placeholder drops out of the run name
+    gputag = multirun.gpu_tag(opts.gpus) if multirun.gpu_in_use(opts.gpus_per_job, process) else ''
 
-    # prepare a trimmed down configuration for benchmarking only reading the input data
-    io_process = copy.deepcopy(process)
-    io_process.prefetch = cms.EDAnalyzer("GenericConsumer",
-        eventProducts = cms.untracked.vstring(collections)
-    )
-    io_process.path = cms.Path(io_process.prefetch)
-    io_process.schedule = cms.Schedule(io_process.path)
-    if 'PrescaleService' in io_process.__dict__:
-      del io_process.PrescaleService
+    # build the trimmed input-only process once per configuration: the input collections and the
+    # auto-generated job report depend only on the configuration, not on the jobs/threads/streams
+    # setup, so this avoids regenerating them (and re-running a short cmsRun) for every setup
+    io_process = None
+    if opts.input_benchmark:
+      collections = resolve_input_collections(config, opts.input_collections, opts.input_xml, opts.input_xml_events, opts.executable)
+      io_process = make_io_process(process, collections)
+    if config_log is not None:
+      sys.stdout = real_stdout
 
-    # benchmark reading the input data
-    print('Benchmarking only the input')
-    io_options = dict(options, repeats = opts.input_benchmark, logdir = None, keep = [], data = None)
-    multiCmsRun(io_process, **io_options)
-    print()
-    # wait the required number of seconds between the I/O benchmark and the actual measurement
-    if opts.wait > 0:
-      time.sleep(opts.wait)
+    for (sjobs, sthreads, sstreams) in setups:
+      jobs, threads, streams = resolveJTS(sjobs, sthreads, sstreams, count)
 
-  if opts.reference_benchmark:
-    # benchmark the same configuration using the reference CMSSW release
-    if 'CMSSW_RELEASE_BASE' in os.environ:
-      # query scram for the reference release environment
-      release_base = os.environ['CMSSW_RELEASE_BASE']
-      variables = subprocess.Popen(['scram', 'runtime', '-sh'], cwd=release_base, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).communicate()[0].splitlines()
-      # make a copy of the environment and update it
-      environ = copy.deepcopy(os.environ)
-      export = re.compile(r'export +(\w+)="(.*)";?')
-      unset = re.compile(r'unset +((\w| )+);?')
-      for line in variables:
-        # set or update environment variables
-        matches = export.match(line)
-        if matches:
-          name = matches[1]
-          value = matches[2]
-          environ[name] = value
-        # unset environment variables
-        matches = unset.match(line)
-        if matches:
-          names = matches[1].split()
-          for name in names:
-            if name in environ:
-              del environ[name]
-      # run the benchmark with the modified environment
-      print('Benchmarking %s with the reference release at %s' % (opts.config, release_base))
-      if opts.logdir:
-          ref_logdir = opts.logdir + '_reference'
+      # per-run output directory: an empty logdir (--no-logdir or --logdir '') -> no logs; otherwise
+      # expand the template (with no --logdir or a bare --logdir, that is the default automatic one)
+      run_logdir = expand_logdir(opts.logdir, config, jobs, threads, streams, opts.gpus_per_job, gputag)
+      # per-run CSV file name: suffix it when running a matrix, to avoid overwriting. The suffix
+      # mirrors the automatic logdir naming (same fields and "_" separator); the optional GPU tag is
+      # appended only when it applies, so CPU-only runs get a clean name
+      if opts.csv and multi:
+        base, ext = os.path.splitext(opts.csv)
+        parts = [ stem, '%dj' % jobs, '%dt' % threads, '%ds' % streams ]
+        if gputag:
+          parts.append(gputag)
+        run_csv = base + '_' + '_'.join(parts) + ext
       else:
-          ref_logdir = None
-      if opts.csv:
-          name, ext = os.path.splitext(opts.csv)
-          ref_csv = name + '_reference' + ext
-          ref_data = open(ref_csv, 'wt', buffering=1, encoding='utf-8')
-      else:
-          ref_data = None
-      ref_options = dict(options, logdir = ref_logdir, data = ref_data, environ = environ)
-      multiCmsRun(process, **ref_options)
-      print()
-    else:
-      print('$CMSSW_RELEASE_BASE is not set, cannot benchmark the reference release')
-    print()
+        run_csv = opts.csv
 
-  print('Benchmarking %s' % opts.config)
-  multiCmsRun(process, **options)
+      # make the output names unique across the configs x setups matrix: if the same directory or
+      # CSV name comes up twice (e.g. a literal --logdir with no placeholders, or two configs with
+      # the same basename), append an incrementing suffix so runs do not clobber each other
+      if multi and run_logdir is not None:
+        run_logdir = unique_name(run_logdir, used_logdirs)
+      if multi and run_csv is not None:
+        run_csv = unique_name(run_csv, used_csvs, split_ext = True)
 
-  # close the CSV file
-  if options['data']:
-    options['data'].close()
+      # keep a copy of the configuration file in the log directory, so each run records what it ran
+      if run_logdir is not None:
+        os.makedirs(run_logdir, exist_ok = True)
+        shutil.copy(config, run_logdir)
+
+      data = open(run_csv, 'wt', buffering=1, encoding='utf-8') if run_csv else None
+
+      # common options for multirun
+      options = {
+        'verbose'             : opts.verbose,
+        'plumbing'            : opts.plumbing,
+        'warmup'              : opts.warmup,
+        'events'              : opts.events,
+        'resolution'          : opts.event_resolution,
+        'skipevents'          : opts.event_skip,
+        'repeats'             : opts.repeats,
+        'wait'                : opts.wait,
+        'jobs'                : jobs,
+        'threads'             : threads,
+        'streams'             : streams,
+        'gpus_per_job'        : opts.gpus_per_job,
+        'allow_hyperthreading': opts.allow_hyperthreading,
+        'set_numa_affinity'   : opts.numa_affinity,
+        'set_cpu_affinity'    : opts.cpu_affinity,
+        'set_gpu_affinity'    : opts.gpu_affinity,
+        'slots'               : opts.slots,
+        'executable'          : opts.executable,
+        'data'                : data,
+        'header'              : opts.csvheader,
+        'logdir'              : run_logdir,
+        'tmpdir'              : opts.tmpdir,
+        'keep'                : opts.keep,
+        'automerge'           : opts.automerge,
+        'autodelete'          : opts.autodelete,
+        'autodelete_delay'    : opts.autodelete_delay,
+        'debug_cpu_usage'     : opts.debug_cpu_usage,
+        'debug_affinity'      : opts.debug_affinity,
+        'debug_logs'          : opts.debug_logs,
+        'source_config'       : config,
+      }
+
+      # optionally save this run's console output to "<run_logdir>/output.log",
+      # while still showing it live (like the "tee" in the legacy hltTiming.sh wrapper)
+      saved_stdout = sys.stdout
+      output_log = None
+      if opts.output_log and run_logdir:
+        os.makedirs(run_logdir, exist_ok = True)
+        output_log = open(os.path.join(run_logdir, 'output.log'), 'w', buffering = 1, encoding = 'utf-8')
+        # prepend the captured preamble so output.log is a complete record (system overview and
+        # the input job report), not just from the I/O warm-up onward
+        output_log.write(header_log.getvalue())
+        output_log.write(config_log.getvalue())
+        sys.stdout = Tee(saved_stdout, output_log)
+
+      try:
+        # print configuration
+        if opts.verbose:
+          printCommonArgs(options)
+
+        if multi:
+          print('=== Configuration %s with %d jobs, %d threads, %d streams ===' % (config, jobs, threads, streams))
+
+        if opts.input_benchmark:
+          # benchmark reading the input data
+          print('Benchmarking only the input')
+          io_options = dict(options, repeats = opts.input_benchmark, logdir = None, keep = [], data = None)
+          multiCmsRun(io_process, **io_options)
+          print()
+          # wait the required number of seconds between the I/O benchmark and the actual measurement
+          if opts.wait > 0:
+            time.sleep(opts.wait)
+
+        if opts.reference_benchmark:
+          # benchmark the same configuration using the reference CMSSW release
+          if 'CMSSW_RELEASE_BASE' in os.environ:
+            # query scram for the reference release environment
+            release_base = os.environ['CMSSW_RELEASE_BASE']
+            variables = subprocess.Popen(['scram', 'runtime', '-sh'], cwd=release_base, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).communicate()[0].splitlines()
+            # make a copy of the environment and update it
+            environ = copy.deepcopy(os.environ)
+            export = re.compile(r'export +(\w+)="(.*)";?')
+            unset = re.compile(r'unset +((\w| )+);?')
+            for line in variables:
+              # set or update environment variables
+              matches = export.match(line)
+              if matches:
+                name = matches[1]
+                value = matches[2]
+                environ[name] = value
+              # unset environment variables
+              matches = unset.match(line)
+              if matches:
+                names = matches[1].split()
+                for name in names:
+                  if name in environ:
+                    del environ[name]
+            # run the benchmark with the modified environment
+            print('Benchmarking %s with the reference release at %s' % (config, release_base))
+            ref_logdir = run_logdir + '_reference' if run_logdir else None
+            if run_csv:
+                name, ext = os.path.splitext(run_csv)
+                ref_data = open(name + '_reference' + ext, 'wt', buffering=1, encoding='utf-8')
+            else:
+                ref_data = None
+            ref_options = dict(options, logdir = ref_logdir, data = ref_data, environ = environ)
+            multiCmsRun(process, **ref_options)
+            if ref_data:
+              ref_data.close()
+            print()
+          else:
+            print('$CMSSW_RELEASE_BASE is not set, cannot benchmark the reference release')
+          print()
+
+        print('Benchmarking %s' % config)
+        multiCmsRun(process, **options)
+      finally:
+        # restore stdout and close the per-run output files
+        sys.stdout = saved_stdout
+        if output_log:
+          output_log.close()
+        if data:
+          data.close()

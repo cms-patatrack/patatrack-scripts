@@ -10,10 +10,10 @@ if not 'CMSSW_BASE' in os.environ:
 
 import copy
 import glob
-import importlib.util
 import itertools
 import math
 import psutil
+import re
 import shutil
 import subprocess
 import tempfile
@@ -40,6 +40,8 @@ except:
 import FWCore.ParameterSet.Config as cms
 
 # local packages
+from common import loadModuleFromFile
+from options import logdir_placeholders
 from cpuinfo import *
 from gpuinfo import *
 from slot import Slot
@@ -101,13 +103,6 @@ auto_merge_map = {
     'output_options': None,
   }
 }
-
-
-def loadModuleFromFile(name, filename):
-    spec = importlib.util.spec_from_file_location(name, filename)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def runMergeCommand(tag, workdir, inputs, output, verbose):
@@ -173,6 +168,192 @@ def runMergeCommand(tag, workdir, inputs, output, verbose):
   if pipe.returncode != 0:
     raise RuntimeError(f'Exit code {pipe.returncode} while running "' + cmdline + '"\n\n' + pipe.stderr.decode(sys.stdout.encoding))
 
+
+# ---------------------------------------------------------------------------
+# GPU selection helpers (used by the --gpus option)
+# ---------------------------------------------------------------------------
+
+def config_accelerators(process):
+  # the accelerator tokens a configuration allows (process.options.accelerators, e.g. ['cpu'],
+  # ['gpu-nvidia'], or ['*'] for "everything available"); an empty or missing list is treated as
+  # ['*']. Lets a CPU-only configuration (accelerators = ['cpu']) drop the %gpus tag even on a GPU
+  # node, without needing "-g 0" or "--gpus".
+  try:
+    acc = list(process.options.accelerators)
+  except (AttributeError, TypeError):
+    acc = []
+  return acc or ['*']
+
+
+def gpu_tag(spec):
+  # build a short, filename-safe tag from a --gpus spec (e.g. "0,1" -> "gpu01", "all" -> "allGPUs");
+  # "none" returns an empty tag, so the %gpus placeholder drops out of the logdir name.
+  if not spec or spec == 'all':
+    return 'allGPUs'
+  if spec == 'none':
+    return ''
+  return 'gpu' + ''.join(c for c in spec if c.isalnum())
+
+
+def gpu_in_use(gpus_per_job, process = None):
+  # whether the run actually uses a GPU: each job asks for at least one, at least one GPU (of any
+  # vendor) is available after the --gpus selection, and -- when a parsed process is given -- its
+  # configuration is not restricted to the CPU. Used to drop the %gpus tag on CPU-only runs.
+  if not (gpus_per_job > 0 and (bool(gpus_nv) or bool(gpus_amd))):
+    return False
+  if process is None:
+    return True
+  return any(a == '*' or a.startswith('gpu') for a in config_accelerators(process))
+
+
+def expand_logdir(template, config, jobs, threads, streams, gpus_per_job, gpu_tag):
+  # expand the placeholders in a --logdir template into the per-run directory name, or return None
+  # if no logs should be stored. The placeholders (their names, descriptions and how each is
+  # rendered) come from the single registry options.logdir_placeholders.
+  if not template:
+    return None
+  params = { 'config': config, 'jobs': jobs, 'threads': threads, 'streams': streams,
+             'gpus_per_job': gpus_per_job, 'gpu_tag': gpu_tag }
+  # an optional tag (%gpus) renders to '' and is then dropped together with its separator
+  values = { name: render(params) for name, _desc, render in logdir_placeholders }
+  # Substitute placeholders in one left-to-right pass (a value that itself contains a "%x" token,
+  # e.g. a config name, is not re-scanned). Each placeholder may absorb one preceding separator (any
+  # non-alphanumeric char): when it expands to empty -- an optional tag that does not apply, like
+  # %gpus with no GPU -- the separator is dropped too, leaving nothing dangling. No name is a prefix
+  # of another, so the longest-first alternation is unambiguous.
+  names = sorted(values, key = len, reverse = True)
+  pattern = r'([^%0-9A-Za-z])?%(' + '|'.join(names) + r')'
+  def _expand(m):
+    sep, value = m.group(1) or '', values[m.group(2)]
+    return sep + value if value else ''
+  return re.sub(pattern, _expand, template)
+
+
+# a GPU UUID, as accepted by CUDA_VISIBLE_DEVICES and the --slot "nv=" syntax
+_gpu_uuid_re = re.compile(r'^GPU-[0-9a-fA-F]+$')
+
+
+def _parse_gpu_device_list(devices):
+  # split a --gpus device list into integer indices and UUID tokens; integer ranges like "0-2" are
+  # expanded. Returns (indices, uuids) as sets of int / str. An invalid token raises RuntimeError.
+  indices = set()
+  uuids = set()
+  for part in devices.split(','):
+    part = part.strip()
+    if not part:
+      continue
+    if _gpu_uuid_re.match(part):
+      uuids.add(part)
+    elif part.isdigit():
+      indices.add(int(part))
+    elif '-' in part:
+      # an integer range like "0-2": expand it (Slot.parse_int_range raises on a bad range)
+      try:
+        for i in Slot.parse_int_range(part):
+          indices.add(i)
+      except (ValueError, TypeError):
+        raise RuntimeError('invalid GPU selector %r in --gpus %r' % (part, devices))
+    else:
+      raise RuntimeError('invalid GPU selector %r in --gpus %r (use an index, a range, or a "GPU-..." UUID)' % (part, devices))
+  return indices, uuids
+
+def _visible_devices_value(devices):
+  # rewrite a --gpus device list as CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES accept it: integer
+  # ranges like "0-2" are expanded, since the runtimes only understand indices (and UUIDs for CUDA)
+  tokens = []
+  for part in devices.split(','):
+    part = part.strip()
+    if not part:
+      continue
+    if _gpu_uuid_re.match(part) or part.isdigit():
+      expanded = [ part ]
+    else:
+      expanded = [ str(i) for i in Slot.parse_int_range(part) ]
+    for token in expanded:
+      if token not in tokens:
+        tokens.append(token)
+  return ','.join(tokens)
+
+
+def _restrict_gpus(gpus, devices, vendor = None):
+  # keep the selected physical indices of `gpus`, preserving the device keys so the per-job affinity
+  # assigns the real GPUs. UUIDs are resolved to NVIDIA indices via nvidia-smi; a UUID in an AMD
+  # selection is a hard error (HIP_VISIBLE_DEVICES does not accept UUIDs).
+  indices, uuids = _parse_gpu_device_list(devices)
+  if uuids and vendor in ('amd', 'rocm', 'hip'):
+    raise RuntimeError('GPU UUIDs are not supported for AMD (HIP_VISIBLE_DEVICES accepts indices only); '
+                       'use integer indices in --gpus %r' % devices)
+  want = set(indices)
+  if uuids:
+    # resolve NVIDIA UUIDs to physical indices via the (cached) nvidia-smi index->uuid map
+    index_uuid = _nvidia_index_uuid()
+    uuid_to_index = { uuid: idx for idx, uuid in index_uuid.items() }
+    for u in uuids:
+      if u in uuid_to_index:
+        want.add(uuid_to_index[u])
+      else:
+        print('Warning: --gpus UUID %r did not match any available NVIDIA GPU UUID %s' % (u, sorted(index_uuid.values())))
+        sys.stdout.flush()
+  kept = type(gpus)((k, v) for k, v in gpus.items() if k in want)
+  if gpus and not kept:
+    print('Warning: --gpus selection %r matched none of the available GPU indices %s' % (devices, sorted(gpus.keys())))
+    sys.stdout.flush()
+  return kept
+
+
+def apply_gpu_selection(spec):
+  # restrict the GPUs available to the automatic affinity to the --gpus selection, equivalent to
+  # running under CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES: the visible-devices environment is set
+  # (so a job the affinity does not pin is still confined to the selection), and the cached GPU
+  # lists are filtered to the selected physical indices - keeping the physical indices, so the
+  # per-job affinity still distributes one GPU per job but only across the selected GPUs. spec is:
+  #   'all'                          -> no restriction
+  #   'none'                         -> disable all GPUs (equivalent to CUDA_VISIBLE_DEVICES="" and
+  #                                   HIP_VISIBLE_DEVICES="" together)
+  #   'IDX[,IDX...]'                 -> restrict the GPUs of whichever vendor(s) are present; UUIDs
+  #                                   ("GPU-...") are supported for NVIDIA only
+  #   'VENDOR=IDX[,...]:VENDOR=...'  -> restrict the named vendor(s); VENDOR is nvidia or amd
+  global gpus_nv, gpus_amd
+  if not spec or spec == 'all':
+    return
+  if spec == 'none':
+    # disable all GPUs of every vendor
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+    os.environ['HIP_VISIBLE_DEVICES'] = ''
+    gpus_nv = type(gpus_nv)()
+    gpus_amd = type(gpus_amd)()
+    return
+  if '=' in spec:
+    for part in spec.split(':'):
+      if '=' not in part:
+        raise RuntimeError('invalid --gpus spec %r' % spec)
+      vendor, devices = part.split('=', 1)
+      vendor = vendor.strip().lower()
+      # validate and restrict first, then export the selection in the form the runtime understands
+      if vendor in ('nvidia', 'nv', 'cuda'):
+        gpus_nv = _restrict_gpus(gpus_nv, devices, vendor)
+        os.environ['CUDA_VISIBLE_DEVICES'] = _visible_devices_value(devices)
+      elif vendor in ('amd', 'rocm', 'hip'):
+        gpus_amd = _restrict_gpus(gpus_amd, devices, vendor)
+        os.environ['HIP_VISIBLE_DEVICES'] = _visible_devices_value(devices)
+      else:
+        raise RuntimeError('unknown GPU vendor %r in --gpus (use "nvidia" or "amd")' % vendor)
+  else:
+    # a plain list: apply it to whichever vendor(s) are present; reject UUIDs when an AMD GPU is
+    # present (ambiguous which vendor they target), since HIP_VISIBLE_DEVICES does not accept UUIDs
+    _, uuids = _parse_gpu_device_list(spec)
+    if uuids and gpus_amd:
+      raise RuntimeError('GPU UUIDs in --gpus are supported for NVIDIA only, but AMD GPUs are present; '
+                         'use the per-vendor form, e.g. nvidia=GPU-...,amd=0,1')
+    value = _visible_devices_value(spec)
+    if gpus_nv:
+      gpus_nv = _restrict_gpus(gpus_nv, spec, 'nvidia')
+      os.environ['CUDA_VISIBLE_DEVICES'] = value
+    if gpus_amd:
+      gpus_amd = _restrict_gpus(gpus_amd, spec, 'amd')
+      os.environ['HIP_VISIBLE_DEVICES'] = value
+    if not gpus_nv and not gpus_amd:
+      os.environ['CUDA_VISIBLE_DEVICES'] = value
 
 @threaded
 def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, debug_logs = False, slot = None, executable = 'cmsRun', environ = None, *args):
@@ -368,17 +549,43 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
 
 
 def parseProcess(filename):
-  # parse the given configuration file and return the `process` object it define
-  # the import logic is taken from edmConfigDump
-
-  # make the behaviour consistent with 'cmsRun file.py'
-  sys.path.append(os.getcwd())
+  # parse the given configuration file and return the `process` object it defines.
+  #
+  # Each configuration is parsed in its own interpreter (a subprocess) and only its fully-expanded
+  # dumpPython() is loaded back here. HLT menus apply their era / ProcessModifier customisations at
+  # import time, and CMSSW forbids a second cms.Process from choosing modifiers the first one did not
+  # ("tried to redefine which Modifiers to use after another Process was already started"), so loading
+  # several configs in a single interpreter would either abort or silently leak the first config's
+  # import-time modifier state into the next. The flat dump has no modifiers and no _cfi/_cff imports,
+  # so it is self-contained and safe to load here alongside other configs' dumps -- and it is exactly
+  # what gets run anyway (multiCmsRun runs process.dumpPython()).
+  scripts_dir = os.path.dirname(os.path.abspath(__file__))
+  helper = '\n'.join((
+    'import sys, os',
+    'sys.path.insert(0, %r)' % scripts_dir,                   # so "common" is importable
+    'from common import loadModuleFromFile',
+    'sys.path.insert(0, os.getcwd())',                        # behave like "cmsRun file.py"
+    'open(sys.argv[2], "w").write(loadModuleFromFile("pycfg", sys.argv[1]).process.dumpPython())',
+  ))
+  fd, dumpfile = tempfile.mkstemp(prefix = 'cfgdump_', suffix = '.py')
+  os.close(fd)
   try:
-    pycfg = loadModuleFromFile('pycfg', filename)
-    process = pycfg.process
-  except:
-    print("Failed to parse %s: %s" % (filename, sys.exc_info()[1]))
-    sys.exit(1)
+    result = subprocess.run([sys.executable, '-c', helper, filename, dumpfile],
+                            stdout = subprocess.PIPE, stderr = subprocess.STDOUT, universal_newlines = True)
+    if result.returncode != 0:
+      output = (result.stdout or '').strip().splitlines()
+      print("Failed to parse %s: %s" % (filename, output[-1] if output else '(no error output)'))
+      sys.exit(1)
+    try:
+      process = loadModuleFromFile('pycfg', dumpfile).process
+    except:
+      print("Failed to parse %s: %s" % (filename, sys.exc_info()[1]))
+      sys.exit(1)
+  finally:
+    try:
+      os.remove(dumpfile)
+    except OSError:
+      pass
 
   return process
 
@@ -415,6 +622,7 @@ def multiCmsRun(
     debug_logs = False,             # print the full logs on job failure (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
+    source_config = None,           # path to the original configuration file; when set together with logdir, the fully-expanded dump that is actually run is also saved as <logdir>/<stem>_dump.py
     *args):                         # additional arguments passed to the executable
 
   # set the number of streams and threads
@@ -456,6 +664,14 @@ def multiCmsRun(
   config = open(os.path.join(workdir.name, 'process.py'), 'w')
   config.write(process.dumpPython())
   config.close()
+
+  # also save the fully-expanded configuration next to the job logs, so each run records both the
+  # original file (copied by the caller) and the exact customised process this runs -- the dump
+  # above, with the per-setup thread/stream/event changes already applied
+  if logdir is not None and source_config is not None:
+    os.makedirs(logdir, exist_ok = True)
+    stem, ext = os.path.splitext(os.path.basename(source_config))
+    shutil.copy(os.path.join(workdir.name, 'process.py'), os.path.join(logdir, stem + '_dump' + ext))
 
   if slots:
     # explicit description of the job slots
@@ -513,15 +729,25 @@ def multiCmsRun(
         cpu_assignment = [ ','.join(cpu_list[index[i]:index[i+1]]) for i in range(jobs) ]
 
     if set_gpu_affinity:
-      # build the list of GPUs for each job:
-      #   - if the number of GPUs per job is greater than or equal to the number of GPUs in the system,
-      #     run each job on all GPUs
-      #   - otherwise, assign GPUs to jobs in a round-robin fashon
-      if gpus_per_job >= len(gpus_nv):
-        gpu_assignment_nvidia = [ ','.join(map(str, list(gpus_nv.keys()))) for i in range(jobs) ]
-      else:
-        gpu_repeated = list(map(str, itertools.islice(itertools.cycle(list(gpus_nv.keys())), jobs * gpus_per_job)))
-        gpu_assignment_nvidia = [ ','.join(gpu_repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
+      # build the list of GPUs for each job, separately for each vendor:
+      #   - if the number of GPUs per job is greater than or equal to the number of GPUs of that
+      #     vendor, run each job on all of them
+      #   - otherwise, assign GPUs to jobs in a round-robin fashion
+      # Only vendors that actually have GPUs are assigned: leaving the other vendor's slot as None
+      # avoids setting an empty CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES, which would disable all
+      # GPUs of that vendor (and note that HIP also honours CUDA_VISIBLE_DEVICES, so on an AMD-only
+      # system an empty CUDA_VISIBLE_DEVICES would hide the AMD GPUs too).
+      def assign_gpus(gpus):
+        keys = list(gpus.keys())
+        if gpus_per_job >= len(keys):
+          return [ ','.join(map(str, keys)) for i in range(jobs) ]
+        repeated = list(map(str, itertools.islice(itertools.cycle(keys), jobs * gpus_per_job)))
+        return [ ','.join(repeated[i*gpus_per_job:(i+1)*gpus_per_job]) for i in range(jobs) ]
+
+      if gpus_nv:
+        gpu_assignment_nvidia = assign_gpus(gpus_nv)
+      if gpus_amd:
+        gpu_assignment_amd = assign_gpus(gpus_amd)
 
     # define the execution environments
     slots = [ Slot(numa_cpu = numa_cpu_nodes[job], numa_mem = numa_mem_nodes[job], cpus = cpu_assignment[job], nvidia_gpus = gpu_assignment_nvidia[job], amd_gpus = gpu_assignment_amd[job]) for job in range(jobs) ]
@@ -595,7 +821,10 @@ def multiCmsRun(
   else:
     n_events = 'all'
 
-  print('Running %s over %s events with %d jobs, each with %d threads, %d streams, and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job))
+  if gpu_in_use(gpus_per_job):
+    print('Running %s over %s events with %d jobs, each with %d threads, %d streams, and %d GPUs' % (n_times, n_events, jobs, threads, streams, gpus_per_job))
+  else:
+    print('Running %s over %s events with %d jobs, each with %d threads, and %d streams' % (n_times, n_events, jobs, threads, streams))
   sys.stdout.flush()
 
   # store the values to compute the average throughput over the repetitions
@@ -908,6 +1137,12 @@ if __name__ == "__main__":
   from options import OptionParser
   parser = OptionParser()
   opts = parser.parse(sys.argv[1:])
+
+  # restrict the visible GPUs (hltTiming.sh-style --gpus) and refresh the GPU detection, so the
+  # system overview, the affinity assignment and the monitoring all agree (benchmark and scan do
+  # the same). Accepts a plain list ("0,1") or a per-vendor form ("nvidia=0,1:amd=0").
+  apply_gpu_selection(opts.gpus)
+
   options = {
     'verbose'             : opts.verbose,
     'debug_logs'          : opts.debug_logs,
@@ -927,7 +1162,8 @@ if __name__ == "__main__":
     'set_gpu_affinity'    : opts.gpu_affinity,
     'slots'               : opts.slots,
     'executable'          : opts.executable,
-    'logdir'              : opts.logdir if opts.logdir else None,
+    # no --logdir / --no-logdir means no logs; otherwise expand the --logdir template
+    'logdir'              : expand_logdir(opts.logdir, opts.configs[0], opts.jobs, opts.threads, opts.streams, opts.gpus_per_job, gpu_tag(opts.gpus)),
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
   }
@@ -935,5 +1171,5 @@ if __name__ == "__main__":
   if options['verbose']:
     info()
 
-  process = parseProcess(opts.config)
+  process = parseProcess(opts.configs[0])
   multiCmsRun(process, **options)

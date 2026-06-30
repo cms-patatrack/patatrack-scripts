@@ -10,6 +10,8 @@ if not 'CMSSW_BASE' in os.environ:
     sys.exit(1)
 
 # local packages
+import multirun
+from common import *
 from options import OptionParser, printCommonArgs
 from multirun import *
 
@@ -68,7 +70,7 @@ Selected Configuration:
   - repeat:          {}
   - threads:         {}
   - streams:         {}
-""".format(opts.config,
+""".format(opts.configs[0],
            steps,
            opts.input_benchmark,
            opts.csv,
@@ -83,7 +85,12 @@ Selected Configuration:
 if __name__ == "__main__":
   opts = parseArguments()
 
-  process = parseProcess(opts.config)
+  # apply --gpus; accepts a plain list ("0,1") or a per-vendor form ("nvidia=0,1:amd=0") for
+  # mixed nodes
+  multirun.apply_gpu_selection(opts.gpus)
+
+  config = opts.configs[0]
+  process = parseProcess(config)
 
   # common options for multirun
   options = {
@@ -107,7 +114,8 @@ if __name__ == "__main__":
     'executable'          : opts.executable,
     'data'                : open(opts.csv, 'wt', buffering=1, encoding='utf-8') if opts.csv else None,
     'header'              : opts.csvheader,
-    'logdir'              : opts.logdir if opts.logdir else None,
+    # the per-step log directory is computed from the --logdir template inside the loop below
+    'logdir'              : None,
     'tmpdir'              : opts.tmpdir,
     'keep'                : opts.keep,
     'automerge'           : opts.automerge,
@@ -142,14 +150,8 @@ if __name__ == "__main__":
 
   if opts.input_benchmark:
     # prepare a trimmed down configuration for benchmarking only reading the input data
-    io_process = copy.deepcopy(process)
-    io_process.prefetch = cms.EDAnalyzer("GenericConsumer",
-        eventProducts = cms.untracked.vstring(opts.input_collections.split(','))
-    )
-    io_process.path = cms.Path(io_process.prefetch)
-    io_process.schedule = cms.Schedule(io_process.path)
-    if 'PrescaleService' in io_process.__dict__:
-      del io_process.PrescaleService
+    collections = resolve_input_collections(config, opts.input_collections, opts.input_xml, opts.input_xml_events, opts.executable)
+    io_process = make_io_process(process, collections)
 
   printJobInfo(opts, steps)
 
@@ -159,18 +161,26 @@ if __name__ == "__main__":
   # do not wait before the first step
   wait = False
 
+  # the --gpus tag is constant across the scan; empty (dropping the optional %gpus placeholder) when
+  # no GPU is in use -- no GPU on the node, -g 0, or a CPU-only config
+  gputag = multirun.gpu_tag(opts.gpus) if multirun.gpu_in_use(opts.gpus_per_job, process) else ''
+
   for step in steps:
     # update the options for each step
     step_opt['threads'] = options['threads'] if options['threads'] is not None else step
     step_opt['streams'] = options['streams'] if options['streams'] is not None else step
     step_opt['jobs']    = options['jobs']    if options['jobs']    is not None else (count + step - 1) // step
 
-    # if the logs are enabled, use a separate directory for each step
-    if options['logdir'] is not None:
-        base = options['logdir']
-        if base:
-            base = base + '/'
-        step_opt['logdir'] = base + 'scan_%d' % step
+    # per-step log directory from the --logdir template; an empty logdir (--no-logdir or --logdir
+    # '') means no logs, while no --logdir or a bare --logdir uses the default template. A separate
+    # scan_<step> subdir keeps the steps apart unless the template already varies per step (via %t/%s/%j).
+    if opts.logdir:
+        base = expand_logdir(opts.logdir, config, step_opt['jobs'], step_opt['threads'], step_opt['streams'], opts.gpus_per_job, gputag)
+        if not any(p in opts.logdir for p in ('%t', '%s', '%j')):
+            base = base.rstrip('/') + '/scan_%d' % step
+        step_opt['logdir'] = base
+    else:
+        step_opt['logdir'] = None
 
     # update the number of events to process based on the number of threads
     if opts.events_extra_per_thread > 0:
