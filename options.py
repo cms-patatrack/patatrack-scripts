@@ -563,15 +563,15 @@ Slots that do not specify it follow '--nvidia-mps' as usual, or use no NVIDIA MP
         group = self.parser.add_argument_group('monitoring options')
         monitor_levels = ['none', 'basic', 'full']
         group.add_argument('--monitor-host',
-            dest = 'host_memory_monitoring',
+            dest = 'host_monitoring',
             choices = monitor_levels,
             default = 'basic',
-            help = 'per-process host memory monitoring detail: none, basic (VSS+RSS), or full (+PSS, ~10%% CPU per job) [default: basic]')
+            help = 'per-process host monitoring detail: none, basic (CPU utilization+VSS+RSS, ~0.1%% CPU per job), or full (+USS+PSS, ~10%% CPU per job) [default: basic]')
         group.add_argument('--monitor-gpu',
             dest = 'gpu_monitoring',
             choices = monitor_levels,
             default = 'basic',
-            help = 'unified CPU+GPU resource monitoring detail: none, basic (GPU utilization+memory), or full (+power+temperature). Samples the in-use NVIDIA (AMD) GPUs via nvidia-smi (amd-smi) on the same cadence as the aggregate host memory; auto-disabled if no supported GPU is present [default: basic]')
+            help = 'GPU resource monitoring detail: none, basic (per-GPU utilization+memory), or full (+power+temperature). Samples the in-use NVIDIA (AMD) GPUs via nvidia-smi (amd-smi) on the same cadence as the aggregate host monitoring; auto-disabled if no supported GPU is present [default: basic]')
 
 
     def parse(self, args):

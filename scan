@@ -191,7 +191,8 @@ if __name__ == "__main__":
         # benchmark reading the input data; do not monitor this throwaway I/O-only run
         if opts.input_benchmark:
           print('Benchmarking only the input')
-          io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None, gpu_monitoring = GpuMonitorInfo.NONE)
+          io_options = dict(step_opt, repeats = opts.input_benchmark, logdir = None, keep = [], data = None,
+                            host_monitoring = HostMonitorInfo.NONE, gpu_monitoring = GpuMonitorInfo.NONE)
           multiCmsRun(io_process, **io_options)
           print()
           # schedule a wait after the I/O benchmark

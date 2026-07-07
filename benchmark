@@ -208,7 +208,7 @@ if __name__ == "__main__":
           # series; it is flushed in the finally so an interrupt still leaves what was collected.
           # Returns None (each run then uses its own monitor) for indefinite runs or when nothing
           # can be surfaced.
-          run_monitor = multirun.start_run_monitor(options['gpu_monitoring'], opts.plumbing, run_logdir, opts.repeats)
+          run_monitor = multirun.start_run_monitor(options['host_monitoring'], options['gpu_monitoring'], opts.plumbing, run_logdir, opts.repeats)
 
           # optionally save this run's console output to "<run_logdir>/output.log", while still
           # showing it live
@@ -235,6 +235,7 @@ if __name__ == "__main__":
             print('Benchmarking only the input')
             io_options = dict(options, repeats = opts.input_benchmark, logdir = None, keep = [], data = None,
                               monitor = run_monitor,
+                              host_monitoring = options['host_monitoring'] if run_monitor else HostMonitorInfo.NONE,
                               gpu_monitoring = run_monitor.level if run_monitor else GpuMonitorInfo.NONE)
             multiCmsRun(io_process, **io_options)
             print()

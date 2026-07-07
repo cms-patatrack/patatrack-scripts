@@ -54,17 +54,17 @@ gpus_nv  = get_gpu_info_nvidia()
 gpus_amd = get_gpu_info_amd()
 
 
-# Define whether to monitor the host memory usage by each process, and with how much detail:
-#   - NONE disable all process memory monitoring;
-#   - BASIC monitors the virtual memory size (VSS) and resident memory size (RSS);
-#   - FULL in addition monitors the proportional memory size (PSS).
+# Define whether to monitor the host CPU and memory usage of each process, and with how much detail:
+#   - NONE  disables all host process monitoring;
+#   - BASIC monitors the CPU utilization, virtual memory size (VSS), and resident memory size (RSS);
+#   - FULL  in addition monitors the unique memory size (USS) and the proportional memory size (PSS).
 
-class HostMemoryInfo(Enum):
+class HostMonitorInfo(Enum):
   NONE = 0
   BASIC = 1
   FULL = 2
 
-monitoring = HostMemoryInfo.BASIC
+monitoring = HostMonitorInfo.BASIC
 
 
 # Define whether and how much detail to monitor for the GPUs (device-level, via nvidia-smi):
@@ -973,16 +973,27 @@ class _MonitorState:
 
 @threaded
 def monitorResources(stop, gpus, level, state, streamer = None, interval = 1.):
-  # sample the aggregate host memory (RSS of this process tree) and the per-GPU utilization/
-  # memory of every monitored GPU (across all vendors) on a single shared cadence, so the CPU
-  # and GPU timestamps line up. `gpus` is a list of MonGpu; the in-use subset is detected at
-  # runtime from the GPUs that have a running process. Each sample is appended to `state` (a
-  # _MonitorState) - which multiCmsRun drains per step (internal / indefinite) or snapshots per
-  # step (shared monitor) - and, when a `streamer` is given, also written to the top-level CSVs as
-  # it arrives (line-buffered, so they survive an interruption or crash).
+  # sample the aggregate host CPU utilization and memory (summed over this process tree) and the
+  # per-GPU utilization/memory of every monitored GPU (across all vendors) on a single shared
+  # cadence, so the CPU and GPU timestamps line up. `gpus` is a list of MonGpu; the in-use subset
+  # is detected at runtime from the GPUs that have a running process. Each sample is appended to
+  # `state` (a _MonitorState) - which multiCmsRun drains per step (internal / indefinite) or
+  # snapshots per step (shared monitor) - and, when a `streamer` is given, also written to the
+  # top-level CSVs as it arrives (line-buffered, so they survive an interruption or crash).
 
-  # build the structured dtype: time + aggregate CPU RSS + per-GPU columns
-  fields = [('time', 'datetime64[ms]'), ('cpu_rss', 'int')]
+  # capture the host monitoring level once, so the structured dtype (built here) and the per-tick
+  # rows (built in the loop below) always have matching widths even if the global `monitoring` were
+  # to change under us; a FULL run adds the USS/PSS columns to both.
+  host_level = monitoring
+
+  # build the structured dtype: time + aggregate host + per-GPU columns
+  fields = [('time', 'datetime64[ms]'),
+            ('cpu_use', 'float'),
+            ('cpu_vms', 'int'),
+            ('cpu_rss', 'int')]
+  if host_level == HostMonitorInfo.FULL:
+    fields.append(('cpu_uss', 'int'))
+    fields.append(('cpu_pss', 'int'))
   for g in gpus:
     fields.append(('%s_util' % g.name, 'int'))
     fields.append(('%s_mem' % g.name, 'int'))
@@ -1001,25 +1012,56 @@ def monitorResources(stop, gpus, level, state, streamer = None, interval = 1.):
   inuse = None
 
   me = psutil.Process(os.getpid())
+  # cache the psutil.Process objects across ticks, keyed by pid: cpu_percent() reports the CPU time
+  # consumed since the previous call *on the same object*, so a Process rebuilt every tick would
+  # always read 0.0. Reusing the objects keeps the per-process baseline between samples.
+  proc_cache = {}
   # anchor the sampling cadence to a monotonic clock, so the per-tick sampling time does not
   # accumulate and skip whole seconds: tick N is scheduled for base + N * interval
   base = time.monotonic()
   tick = 0
   while not stop.is_set():
     timestamp = datetime.now()
-    # aggregate host memory: sum the RSS of this process and all its children (the cmsRun jobs)
+    use = 0
+    vms = 0
     rss = 0
-    try:
-      for proc in [me] + me.children(recursive = True):
-        try:
-          rss += proc.memory_info().rss
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-          pass
-    except Exception:
-      # never let a transient psutil error (AccessDenied, a vanished or zombie child, ...) kill the
-      # monitor thread: a dead thread enqueues no result, so its whole output would be dropped
-      pass
-    row = [timestamp, rss]
+    uss = 0
+    pss = 0
+    if host_level != HostMonitorInfo.NONE:
+      # aggregate the host metrics over this process and all its children (the cmsRun jobs)
+      try:
+        # refresh the monitored set, reusing the cached Process object for any pid already seen so
+        # cpu_percent() keeps its per-process baseline; drop the objects of processes that exited
+        procs = { p.pid: proc_cache.get(p.pid, p) for p in [me] + me.children(recursive = True) }
+        proc_cache = procs
+        for proc in procs.values():
+          try:
+            with proc.oneshot():
+              # cpu_percent() returns a float representing the process CPU utilization as a
+              # percentage; it can be > 100.0 for a process running multiple threads on different CPUs
+              use += proc.cpu_percent()
+              if host_level == HostMonitorInfo.FULL:
+                # memory_full_info() also measures the process unique memory size (USS) and computes
+                # its proportional memory size (PSS), but may cost significant CPU, about 10% per job
+                mem = proc.memory_full_info()
+                uss += mem.uss
+                pss += mem.pss
+              else:
+                # memory_info() measures the process virtual (VSS/vsize) and resident (RSS) memory
+                # sizes at a negligible CPU cost, around 0.1% per job being monitored
+                mem = proc.memory_info()
+              vms += mem.vms
+              rss += mem.rss
+          except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+      except Exception:
+        # never let a transient psutil error (AccessDenied, a vanished or zombie child, ...) kill the
+        # monitor thread: a dead thread enqueues no result, so its whole output would be dropped
+        pass
+    row = [timestamp, use, vms, rss]
+    if host_level == HostMonitorInfo.FULL:
+      row.append(uss)
+      row.append(pss)
     # one sampling command per backend, shared across that backend's GPUs
     samples = { b: b.sample(level) for b in backends }
     for g in gpus:
@@ -1069,10 +1111,19 @@ def _monitor_elapsed_seconds(times):
 # CSV row formatting, shared by the batch writer (writeMonitorOutputs) and the streaming writer
 # (_MonitorCsvStreamer), so both produce byte-identical rows. `rec` is one structured-array record.
 def _cpu_csv_header():
-  return 'elapsed_seconds,cpu_memory_mib'
+  header = 'elapsed_seconds,cpu_usage,cpu_vms_mib,cpu_rss_mib'
+  if monitoring == HostMonitorInfo.FULL:
+    header += ',cpu_uss_mib,cpu_pss_mib'
+  return header
 
 def _cpu_csv_row(elapsed, rec):
-  return '%d,%d' % (elapsed, int(rec['cpu_rss']) // (1024 * 1024))
+  cols = [ '%d' % elapsed, '%.2f' % float(rec['cpu_use']),
+           '%d' % (int(rec['cpu_vms']) // (1024 * 1024)),
+           '%d' % (int(rec['cpu_rss']) // (1024 * 1024)) ]
+  if monitoring == HostMonitorInfo.FULL:
+    cols.append('%d' % (int(rec['cpu_uss']) // (1024 * 1024)))
+    cols.append('%d' % (int(rec['cpu_pss']) // (1024 * 1024)))
+  return ','.join(cols)
 
 def _gpu_csv_header(gpus, level):
   header = 'elapsed_seconds'
@@ -1103,13 +1154,14 @@ def _gpu_csv_row(elapsed, rec, gpus, level):
 
 
 def writeMonitorOutputs(logdir, data, inuse, level):
-  # write the full-run aggregate CPU memory CSV and per-GPU CSV at the top level of `logdir`
-  # (the per-step numpy arrays are folded into each step's monit.py, see appendStepResource)
+  # write the full-run aggregate host CPU (utilization + memory) CSV and per-GPU CSV at the top
+  # level of `logdir` (the per-step numpy arrays are folded into each step's monit.py, see
+  # appendStepResource)
   if data is None or len(data) == 0:
     return
   elapsed = _monitor_elapsed_seconds(data['time'])
 
-  # aggregate host memory (total RSS in MiB)
+  # aggregate host CPU utilization (%) and memory (total VSS/RSS, and USS/PSS when FULL, in MiB)
   with open(logdir + '/cpu_monitor.csv', 'w') as f:
     f.write(_cpu_csv_header() + '\n')
     for i in range(len(data)):
@@ -1134,23 +1186,31 @@ class _MonitorCsvStreamer:
     self.first = None
     os.makedirs(logdir, exist_ok = True)     # the monitor starts before any per-step dir is created
     self.cpu = open(logdir + '/cpu_monitor.csv', 'w', buffering = 1)
-    try:
-      self.gpu = open(logdir + '/gpu_monitor.csv', 'w', buffering = 1)
-    except Exception:
-      self.cpu.close()                       # do not leak the first handle if the second open fails
-      raise
+    # only produce a gpu_monitor.csv when at least one GPU is actually monitored; the host CPU/memory
+    # CSV is written independently, so --monitor-gpu none (or a GPU-less node) still gets cpu_monitor.csv
+    self.gpu = None
+    if gpus:
+      try:
+        self.gpu = open(logdir + '/gpu_monitor.csv', 'w', buffering = 1)
+      except Exception:
+        self.cpu.close()                     # do not leak the first handle if the second open fails
+        raise
     self.cpu.write(_cpu_csv_header() + '\n')
-    self.gpu.write(_gpu_csv_header(gpus, level) + '\n')
+    if self.gpu is not None:
+      self.gpu.write(_gpu_csv_header(gpus, level) + '\n')
 
   def append(self, timestamp, rec):
     if self.first is None:
       self.first = timestamp
     elapsed = int((timestamp - self.first).total_seconds())
     self.cpu.write(_cpu_csv_row(elapsed, rec) + '\n')
-    self.gpu.write(_gpu_csv_row(elapsed, rec, self.gpus, self.level) + '\n')
+    if self.gpu is not None:
+      self.gpu.write(_gpu_csv_row(elapsed, rec, self.gpus, self.level) + '\n')
 
   def close(self):
     for f in (self.cpu, self.gpu):
+      if f is None:
+        continue
       try:
         f.close()
       except Exception:
@@ -1175,22 +1235,23 @@ def _np_array_literal(obj):
     return repr(obj).replace('array(', 'np.array(')
 
 
-def _write_resource(f, resource, inuse, level):
-  # append the 'gpus' / 'gpu_monitoring' / 'resource_monit' block for one step's aggregate CPU +
+def _write_gpu_monit(f, resource, inuse, level):
+  # append the 'gpus' / 'gpu_monitoring' / 'gpu_monit' block for one step's aggregate CPU +
   # per-GPU slice to an already-open monit.py
   f.write('\ngpus = %r\n' % [ g.name for g in inuse ])
   f.write('gpu_monitoring = %r\n\n' % level.name)
-  f.write('resource_monit = ' + _np_array_literal(resource) + '\n')
+  f.write('gpu_monit = ' + _np_array_literal(resource) + '\n')
 
 
 def writeStepMonit(logdir, monit, resource = None, inuse = None, level = None):
-  # write a step's monit.py: the per-process host-memory arrays and, when the resource monitor is
-  # active, that step's aggregate CPU + per-GPU slice, both as importable numpy literals
+  # write a step's monit.py: including
+  # the per-process host monitoring arrays and, when the resource monitor is
+  # active, that step's per-GPU slice, both as importable numpy literals
   with open(logdir + '/monit.py', 'w') as f:
     f.write('import numpy as np\n\n')
-    f.write('monit = ' + _np_array_literal(monit) + '\n')
+    f.write('cpu_monit = ' + _np_array_literal(monit) + '\n')
     if resource is not None and len(resource):
-      _write_resource(f, resource, inuse, level)
+      _write_gpu_monit(f, resource, inuse, level)
 
 
 def appendStepResource(logdir, resource, inuse, level):
@@ -1199,13 +1260,14 @@ def appendStepResource(logdir, resource, inuse, level):
   if resource is None or len(resource) == 0:
     return
   with open(logdir + '/monit.py', 'a') as f:
-    _write_resource(f, resource, inuse, level)
+    _write_gpu_monit(f, resource, inuse, level)
 
 
 def printHardwareSummary(data, inuse, level, interval = 1.):
   # print a peak/mean summary of the aggregate CPU and per-GPU usage
   if data is None or len(data) == 0:
     return
+  cpu_use = data['cpu_use'].astype('float64')
   cpu_mib = data['cpu_rss'].astype('float64') / (1024 * 1024)
   print()
   print('-------------------------------------')
@@ -1213,9 +1275,12 @@ def printHardwareSummary(data, inuse, level, interval = 1.):
   print('-------------------------------------')
   print('Monitoring Interval: %g second(s)' % interval)
   print()
-  print('--- CPU Memory ---')
+  print('--- CPU Memory & Usage ---')
   print('Peak Total CPU Memory Usage: %.0f MiB' % cpu_mib.max())
   print('Mean Total CPU Memory Usage: %.0f MiB' % cpu_mib.mean())
+  print()
+  print('Peak Total CPU Utilization: %.1f%%' % cpu_use.max())
+  print('Mean Total CPU Utilization: %.1f%%' % cpu_use.mean())
   if inuse:
     total_mem = np.zeros(len(data), dtype = 'float64')
     for g in inuse:
@@ -1257,20 +1322,33 @@ class RunMonitor:
     self.streamer = streamer
 
 
-def start_run_monitor(level, plumbing, logdir, repeats):
+def start_run_monitor(host_level, level, plumbing, logdir, repeats):
   # start a monitor spanning several runs, for a finite benchmark whose output can be surfaced;
-  # return a RunMonitor, or None when it does not apply (monitoring off, no GPU, nothing to surface,
-  # or an indefinite run - which falls back to each run's own bounded per-step monitor instead).
+  # return a RunMonitor, or None when it does not apply (both host and GPU monitoring off, nothing to
+  # surface, or an indefinite run - which falls back to each run's own bounded per-step monitor).
+  # Host and GPU monitoring are independent: --monitor-gpu none still records the host CPU/memory.
   # With a logdir the top-level CSVs are streamed as the samples arrive, so they survive a crash.
-  global _warned_no_monitor_gpu
-  if level == GpuMonitorInfo.NONE or repeats <= 0 or (logdir is None and plumbing):
+  global _warned_no_monitor_gpu, monitoring
+  # this shared monitor thread (and its CSV header + dtype) is built here, before any multiCmsRun
+  # sets the global; apply the requested host level now so the aggregate host columns match the
+  # per-tick samples (a FULL run adds the USS/PSS columns). Each multiCmsRun re-applies the same
+  # level, so this stays consistent across every phase of the run.
+  monitoring = host_level
+  # gates on whether the run can be surfaced at all, independent of what is monitored: an indefinite
+  # run (repeats <= 0) falls back to each run's own bounded per-step monitor, and a plumbing run with
+  # no logdir has nowhere to put the samples
+  if repeats <= 0 or (logdir is None and plumbing):
     return None
-  gpus = monitored_gpus()
-  if not gpus:
-    if not _warned_no_monitor_gpu:
-      print('Warning: GPU monitoring requested but no supported GPU (nvidia-smi / amd-smi) is available or selected; disabling GPU monitoring.')
-      sys.stdout.flush()
-      _warned_no_monitor_gpu = True
+  # the GPUs are monitored only when GPU monitoring is on and a supported GPU is present; the host
+  # CPU/memory is monitored independently, so --monitor-gpu none (or a GPU-less node) still yields
+  # cpu_monitor.csv and the CPU summary
+  gpus = monitored_gpus() if level != GpuMonitorInfo.NONE else []
+  if level != GpuMonitorInfo.NONE and not gpus and not _warned_no_monitor_gpu:
+    print('Warning: GPU monitoring requested but no supported GPU (nvidia-smi / amd-smi) is available or selected; disabling GPU monitoring.')
+    sys.stdout.flush()
+    _warned_no_monitor_gpu = True
+  # nothing to monitor: neither the host nor any GPU
+  if host_level == HostMonitorInfo.NONE and not gpus:
     return None
   streamer = _MonitorCsvStreamer(logdir, gpus, level) if logdir is not None else None
   stop = threading.Event()
@@ -1357,13 +1435,13 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
   stderr = open(logfiles[1], 'w')
 
   # collect the monitoring information about the subprocess
-  buffer_type = np.dtype([('time', 'datetime64[ms]'), ('vsz', 'int'), ('rss', 'int'), ('pss','int')])
+  buffer_type = np.dtype([('time', 'datetime64[ms]'), ('cpu_use', 'float'), ('vsz', 'int'), ('rss', 'int'), ('uss', 'int'), ('pss','int')])
   buffer_data = []
 
   # start the subprocess
   timestamp = datetime.now()
   autostamp = timestamp
-  buffer_data.append((timestamp, 0, 0, 0))  # time, vsize, rss, pss
+  buffer_data.append((timestamp, 0, 0, 0, 0, 0))  # time, cpu_use, vsize, rss, uss, pss
   job = subprocess.Popen(command, cwd = workdir, env = environment, stdout = stdout, stderr = stderr)
   proc = psutil.Process(job.pid)
 
@@ -1376,23 +1454,26 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
     except subprocess.TimeoutExpired:
         pass
     timestamp = datetime.now()
-    if monitoring == HostMemoryInfo.NONE:
-      # do not measure the subprocess memory usage
-      buffer_data.append((timestamp, 0, 0, 0))
+    if monitoring == HostMonitorInfo.NONE:
+      # do not measure the subprocess cpu and host memory usage
+      buffer_data.append((timestamp, 0, 0, 0, 0, 0))
     else:
-      # measure the subprocess memory usage
+      # measure the subprocess cpu and memory usage
       try:
         with proc.oneshot():
-          if monitoring == HostMemoryInfo.BASIC:
+          # cpu_percent() returns a float representing the process CPU utilization as a percentage;
+          # it can be > 100.0 for a process running multiple threads on different CPUs
+          use = proc.cpu_percent()
+          if monitoring == HostMonitorInfo.BASIC:
             # memory_info() measures the process virtual memory size (VSS/vsize) and resident memory size (RSS), and
             # consumes a negligible CPU usage, around 0.1% per job being monitored.
             mem = proc.memory_info()
-            buffer_data.append((timestamp, mem.vms, mem.rss, 0))  # time, vsize, rss, n/a
-          elif monitoring == HostMemoryInfo.FULL:
-            # memory_full_info() is measures also the the process unique memory size (USS) and computes its proportional
-            # memory size (PSS), but may have a significan CPU usage, about 10% per job being monitored.
+            buffer_data.append((timestamp, use, mem.vms, mem.rss, 0, 0))  # time, CPU usage, vsize, rss, n/a, n/a
+          elif monitoring == HostMonitorInfo.FULL:
+            # memory_full_info() also measures the process unique memory size (USS) and computes its proportional
+            # memory size (PSS), but may have a significant CPU usage, about 10% per job being monitored.
             mem = proc.memory_full_info()
-            buffer_data.append((timestamp, mem.vms, mem.rss, mem.pss))  # time, vsize, rss, pss
+            buffer_data.append((timestamp, use, mem.vms, mem.rss, mem.uss, mem.pss))  # time, CPU usage, vsize, rss, uss, pss
       except psutil.NoSuchProcess:
         break
     # if requested, autodelete the files in the working directory
@@ -1573,8 +1654,8 @@ def build_options(opts, jobs, threads, streams, logdir = None, data = None, head
     'debug_cpu_usage'     : opts.debug_cpu_usage,
     'debug_affinity'      : opts.debug_affinity,
     'debug_logs'          : opts.debug_logs,
-    'host_memory_monitoring': HostMemoryInfo[opts.host_memory_monitoring.upper()],
-    'gpu_monitoring'        : GpuMonitorInfo[opts.gpu_monitoring.upper()],
+    'host_monitoring'     : HostMonitorInfo[opts.host_monitoring.upper()],
+    'gpu_monitoring'      : GpuMonitorInfo[opts.gpu_monitoring.upper()],
     'nvidia_mps'          : opts.nvidia_mps,
   }
 
@@ -1611,17 +1692,17 @@ def multiCmsRun(
     debug_logs = False,             # print the full logs on job failure (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
-    host_memory_monitoring = HostMemoryInfo.BASIC,   # per-process host memory monitoring detail
-    gpu_monitoring = GpuMonitorInfo.NONE,            # unified device-level CPU+GPU monitoring detail
+    host_monitoring = HostMonitorInfo.BASIC,          # per-process host monitoring detail
+    gpu_monitoring = GpuMonitorInfo.BASIC,            # device-level GPU monitoring detail
     nvidia_mps = None,              # NVIDIA MPS active thread percentage: an integer, or <=0 to split evenly among the jobs per GPU, or None to not use NVIDIA MPS
     monitor = None,                 # a shared RunMonitor to slice per-step data from (its owner writes the continuous top-level CSVs); None to use this run's own monitor
     source_config = None,           # path to the original configuration file; when set together with logdir, the fully-expanded dump that is actually run is also saved as <logdir>/<stem>_dump.py
     *args):                         # additional arguments passed to the executable
 
-  # apply the requested host-memory monitoring level; this global is read (never written) by
-  # singleCmsRun, and is set here before any job thread starts, so there is no race
+  # apply the requested host monitoring level; this global is read (never written) by singleCmsRun
+  # and monitorResources, and is set here before any job or monitor thread starts, so there is no race
   global monitoring
-  monitoring = host_memory_monitoring
+  monitoring = host_monitoring
 
   # set the number of streams and threads
   process.options.numberOfThreads = cms.untracked.uint32(threads)
@@ -1774,7 +1855,7 @@ def multiCmsRun(
   # logdir, and the on-screen HARDWARE USAGE SUMMARY needs human-readable (non-plumbing) output.
   # For an indefinite run (repeats <= 0) only the per-step monit.py path applies (there is no end at
   # which to write the top-level CSV/summary), so it needs a logdir; each step's slice is drained
-  # into its monit.py so memory stays bounded, exactly like the per-process host-memory monitoring.
+  # into its monit.py so memory stays bounded, exactly like the per-process host monitoring.
   global _warned_no_monitor_gpu
   monitor_thread = None
   monitor_stop = None
@@ -1787,9 +1868,12 @@ def multiCmsRun(
     monitor_state = monitor.state
     monitor_gpus = monitor.gpus
     gpu_monitoring = monitor.level
-  elif gpu_monitoring != GpuMonitorInfo.NONE and (logdir is not None or (not plumbing and repeats > 0)):
-    monitor_gpus = monitored_gpus()
-    if not monitor_gpus:
+  elif (host_monitoring != HostMonitorInfo.NONE or gpu_monitoring != GpuMonitorInfo.NONE) and (logdir is not None or (not plumbing and repeats > 0)):
+    # monitor the GPUs only when GPU monitoring is on and a supported GPU is present; the host
+    # CPU/memory is monitored independently, so --monitor-gpu none (or a GPU-less node) still records
+    # the host metrics
+    monitor_gpus = monitored_gpus() if gpu_monitoring != GpuMonitorInfo.NONE else []
+    if gpu_monitoring != GpuMonitorInfo.NONE and not monitor_gpus:
       # warn once per process: with the default --monitor-gpu basic this would otherwise print
       # on every run on a CPU-only node
       if not _warned_no_monitor_gpu:
@@ -1797,7 +1881,8 @@ def multiCmsRun(
         sys.stdout.flush()
         _warned_no_monitor_gpu = True
       gpu_monitoring = GpuMonitorInfo.NONE
-    else:
+    # start the monitor when there is anything left to monitor (host and/or GPU)
+    if host_monitoring != HostMonitorInfo.NONE or monitor_gpus:
       monitor_stop = threading.Event()
       monitor_state = _MonitorState()
       monitor_thread = monitorResources(monitor_stop, monitor_gpus, gpu_monitoring, monitor_state)
@@ -2093,7 +2178,7 @@ def multiCmsRun(
       if data:
         data.write(f'{jobs}, {overlap:0.4f}, {threads}, {streams}, {gpus_per_job}, {jobs_start:.3f}, {jobs_stop:.3f}, {min_events}, {max_events}, {throughput}, {error}, {overlap_start:.3f}, {overlap_stop:.3f}, {overlap_events}, {overlap_throughput}, {overlap_error}\n')
 
-      # write this step's monit.py (per-process host memory, plus this step's resource slice)
+      # write this step's monit.py (per-process host CPU + memory, plus this step's resource slice)
       if thislogdir is not None:
         if external_monitor:
           # shared monitor: slice this step's window non-destructively (its owner keeps the full
