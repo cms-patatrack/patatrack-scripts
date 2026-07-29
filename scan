@@ -58,19 +58,19 @@ def parseArguments():
 def printJobInfo(opts, steps):
   print("""
 Selected Configuration:
-  - config:       {}
-  - steps:        {}
-  - IO benchmark: {}
-  - csv file:     {}
-  - logdir:       {}
-  - events_limit: {}
-  - jobs:         {}
-  - repeat:       {}
-  - threads:      {}
-  - streams:      {}
+  - config:          {}
+  - steps:           {}
+  - input benchmark: {}
+  - csv file:        {}
+  - logdir:          {}
+  - events_limit:    {}
+  - jobs:            {}
+  - repeat:          {}
+  - threads:         {}
+  - streams:         {}
 """.format(opts.config,
            steps,
-           opts.run_io_benchmark,
+           opts.input_benchmark,
            opts.csv,
            opts.logdir,
            opts.events_limit,
