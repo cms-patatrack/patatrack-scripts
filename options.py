@@ -460,6 +460,12 @@ Slots that do not specify it follow '--nvidia-mps' as usual, or use no NVIDIA MP
             default = [],
             help = 'ignores --numa-affinity, --cpu-affinity, --gpu-affinity, and define explicitly the execution environment for a job slot (see below)')
 
+        self.parser.add_argument('--ignore-job-errors',
+            dest = 'ignore_errors',
+            action = 'store_true',
+            default = False,
+            help = 'ignores failures in the underlying jobs (that is, jobs terminating with a non-zero exit status) instead of skipping the affected measurements [default: False]')
+
         self.parser.add_argument('--csv',
             dest = 'csv',
             metavar = 'FILE',

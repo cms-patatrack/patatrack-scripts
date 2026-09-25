@@ -1383,7 +1383,7 @@ def finish_run_monitor(monitor, logdir, plumbing):
 
 
 @threaded
-def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, debug_logs = False, slot = None, executable = 'cmsRun', environ = None, *args):
+def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], autodelete_delay = 60., verbose = False, debug_logs = False, slot = None, executable = 'cmsRun', environ = None, ignore_errors = False, *args):
   if slot is None:
       slot = Slot()
 
@@ -1522,19 +1522,20 @@ def singleCmsRun(filename, workdir, logdir = None, keep = [], autodelete = [], a
 
   elif (job.returncode > 0):
     print("The underlying %s job failed with return code %d" % (executable, job.returncode))
-    print()
-    if debug_logs:
-        print("The full error log is:")
-        stderr.seek(0)
-        print("".join(stderr.readlines()))
-    else:
-        print("The last lines of the error log are:")
-        print("".join(stderr.readlines()[-10:]))
-    print()
-    print("See %s and %s for the full logs" % logfiles)
-    sys.stdout.flush()
-    stderr.close()
-    return None
+    if not ignore_errors:
+      print()
+      if debug_logs:
+          print("The full error log is:")
+          stderr.seek(0)
+          print("".join(stderr.readlines()))
+      else:
+          print("The last lines of the error log are:")
+          print("".join(stderr.readlines()[-10:]))
+      print()
+      print("See %s and %s for the full logs" % logfiles)
+      sys.stdout.flush()
+      stderr.close()
+      return None
 
   if verbose:
     print("The underlying %s job completed successfully" % executable)
@@ -1643,6 +1644,7 @@ def build_options(opts, jobs, threads, streams, logdir = None, data = None, head
     'set_gpu_affinity'    : opts.gpu_affinity,
     'slots'               : opts.slots,
     'executable'          : opts.executable,
+    'ignore_errors'       : opts.ignore_errors,
     'data'                : data,
     'header'              : header,
     'logdir'              : logdir,
@@ -1692,6 +1694,7 @@ def multiCmsRun(
     debug_logs = False,             # print the full logs on job failure (default: False)
     executable = 'cmsRun',          # executable to run, usually cmsRun
     environ = None,                 # shell environment to use instead of os.environ
+    ignore_errors = False,          # ignore non-zero job return status
     host_monitoring = HostMonitorInfo.BASIC,          # per-process host monitoring detail
     gpu_monitoring = GpuMonitorInfo.BASIC,            # device-level GPU monitoring detail
     nvidia_mps = None,              # NVIDIA MPS active thread percentage: an integer, or <=0 to split evenly among the jobs per GPU, or None to not use NVIDIA MPS
@@ -1926,6 +1929,7 @@ def multiCmsRun(
           slot = slots[job],
           executable = executable,
           environ = environ,
+          ignore_errors = ignore_errors,
           *args)
 
       # start all threads
@@ -2022,6 +2026,7 @@ def multiCmsRun(
           slot = slots[job],
           executable = executable,
           environ = environ,
+          ignore_errors = ignore_errors,
           *args)
 
       # start profiling the benchmark script itself
